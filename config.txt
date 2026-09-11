@@ -1,0 +1,9 @@
+# notoons configuration file
+# Specify folder paths for outputs, logs, and temporary files.
+# Relative paths are resolved relative to the application directory.
+# Absolute paths (e.g. C:\Data\notoons\outputs) are also supported.
+
+outputs_dir = outputs
+logs_dir = logs
+temp_dir = temp
+
