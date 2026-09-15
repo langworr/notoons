@@ -1,10 +1,16 @@
+"""Integration tests for the Notoons PDF conversion web app."""
+
 import os
 import time
+
 import pymupdf
 from falcon import testing
+
 import app
 
+
 def test_async_and_folder_cleanup():
+    """Verify config, async conversion, temp cleanup, and output cleanup across the app lifecycle."""
     client = testing.TestClient(app.app)
 
     # 1. Test GET /config
@@ -96,9 +102,10 @@ def test_async_and_folder_cleanup():
     res_del = client.simulate_delete(f"/jobs/{job_id}")
     assert res_del.status_code == 200
     assert not os.path.exists(expected_cbz), f"CBZ output file was NOT deleted after DELETE /jobs/{job_id}"
-    print(f"[PASS] Output file cleaned up from outputs_dir on job deletion")
+    print("[PASS] Output file cleaned up from outputs_dir on job deletion")
 
     print("\nALL FOLDER CONFIGURATION & CLEANUP TESTS PASSED WITH 100% SUCCESS!")
+
 
 if __name__ == "__main__":
     test_async_and_folder_cleanup()

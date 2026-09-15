@@ -1,13 +1,15 @@
+"""Web application for uploading PDFs and converting them to CBZ archives."""
+
 import asyncio
-import io
-import json
 import os
 import time
 import traceback
 import uuid
+
 import falcon
 import falcon.asgi
 from falcon.media.multipart import MultipartFormHandler
+
 import converter
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,10 +19,7 @@ if not os.path.isdir(ASSETS_DIR):
 
 
 def load_config() -> dict:
-    """
-    Load folder configuration from a dedicated text configuration file (config.txt)
-    read at application startup. Supports 'key = value' syntax and comments (#, ;).
-    """
+    """Load runtime directories from the application config file and environment overrides."""
     cfg = {
         "outputs_dir": "outputs",
         "logs_dir": "logs",
@@ -45,7 +44,7 @@ def load_config() -> dict:
                     if k in cfg:
                         cfg[k] = v
             print(f"[CONFIG] Loaded configuration from {config_file}")
-        except Exception as e:
+        except (OSError, UnicodeError, ValueError) as e:
             print(f"[WARN] Failed to read config.txt: {e}")
 
     # Environment variables override config.txt if explicitly provided
@@ -62,12 +61,11 @@ def load_config() -> dict:
     return cfg
 
 
-
 CONFIG = load_config()
 
 
 def cleanup_temp_dir():
-    """Clean up any orphan temporary files on startup."""
+    """Remove stale temporary files from the upload cache directory on startup."""
     temp_dir = CONFIG["temp_dir"]
     if os.path.isdir(temp_dir):
         for fname in os.listdir(temp_dir):
@@ -75,7 +73,7 @@ def cleanup_temp_dir():
             try:
                 if os.path.isfile(fpath):
                     os.remove(fpath)
-            except Exception:
+            except OSError:
                 pass
 
 
@@ -88,7 +86,7 @@ CACHE_TTL = 7200  # 2 hours retention
 
 
 def cleanup_jobs():
-    """Remove expired jobs and clean up their output files."""
+    """Delete expired jobs and remove any on-disk output associated with them."""
     now = time.time()
     expired = [jid for jid, j in JOBS.items() if now - j.get("created_at", 0) > CACHE_TTL]
     for jid in expired:
@@ -101,30 +99,26 @@ def cleanup_jobs():
             if cbz_p and os.path.isfile(cbz_p):
                 try:
                     os.remove(cbz_p)
-                except Exception:
+                except OSError:
                     pass
             # Clean up temp upload file if still present
             tmp_p = j.get("temp_pdf_path")
             if tmp_p and os.path.isfile(tmp_p):
                 try:
                     os.remove(tmp_p)
-                except Exception:
+                except OSError:
                     pass
 
 
 def run_job_sync(job_id: str, temp_pdf_path: str, cbz_path: str, log_path: str, mode: str, dpi: int):
-    """
-    Synchronous background worker executed in a separate thread via asyncio.to_thread.
-    Streams input from disk, writes output to disk, and logs to both memory and log file.
-    Always cleans up temporary input files when done.
-    """
+    """Execute a conversion job in a worker thread, updating job state and cleanup on exit."""
     job = JOBS.get(job_id)
     if not job:
         # If job was removed before starting, delete temp file
         if os.path.isfile(temp_pdf_path):
             try:
                 os.remove(temp_pdf_path)
-            except Exception:
+            except OSError:
                 pass
         return
 
@@ -144,7 +138,7 @@ def run_job_sync(job_id: str, temp_pdf_path: str, cbz_path: str, log_path: str, 
         try:
             with open(log_path, "a", encoding="utf-8") as lf:
                 lf.write(line + "\n")
-        except Exception:
+        except OSError:
             pass
 
     try:
@@ -165,7 +159,7 @@ def run_job_sync(job_id: str, temp_pdf_path: str, cbz_path: str, log_path: str, 
         job["log_path"] = log_path
         job["progress_percent"] = 100
         job["updated_at"] = time.time()
-    except Exception as e:
+    except (OSError, ValueError, TypeError, KeyError, IndexError, RuntimeError) as e:
         err_msg = str(e)
         tb = traceback.format_exc()
         job["status"] = "failed"
@@ -178,18 +172,19 @@ def run_job_sync(job_id: str, temp_pdf_path: str, cbz_path: str, log_path: str, 
         if os.path.isfile(cbz_path):
             try:
                 os.remove(cbz_path)
-            except Exception:
+            except OSError:
                 pass
     finally:
         # CRITICAL: Always delete the temporary uploaded PDF once conversion finishes or fails
         if os.path.isfile(temp_pdf_path):
             try:
                 os.remove(temp_pdf_path)
-            except Exception:
+            except OSError:
                 pass
 
 
 async def start_job_background(job_id: str, temp_pdf_path: str, cbz_path: str, log_path: str, mode: str, dpi: int):
+    """Launch the PDF conversion job in a background thread for non-blocking processing."""
     await asyncio.to_thread(run_job_sync, job_id, temp_pdf_path, cbz_path, log_path, mode, dpi)
 
 
@@ -200,577 +195,7 @@ INDEX_HTML = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="/favicon.png">
   <title>Notoons - PDF to CBZ Converter</title>
-  <style>
-    :root {
-      --bg: #070a12;
-      --card-bg: rgba(17, 24, 39, 0.85);
-      --card-border: rgba(255, 255, 255, 0.08);
-      --card-border-hover: rgba(56, 189, 248, 0.3);
-      --accent: #38bdf8;
-      --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
-      --accent-hover: #0ea5e9;
-      --success: #34d399;
-      --success-gradient: linear-gradient(135deg, #34d399 0%, #059669 100%);
-      --warning: #fbbf24;
-      --danger: #f87171;
-      --text: #f8fafc;
-      --muted: #94a3b8;
-      --input-bg: #0b1120;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background-color: var(--bg);
-      background-image: 
-        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(14, 165, 233, 0.15), transparent),
-        radial-gradient(ellipse 60% 40% at 50% 120%, rgba(30, 58, 138, 0.12), transparent);
-      background-attachment: fixed;
-      color: var(--text);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 3rem 1.25rem 5rem 1.25rem;
-      -webkit-font-smoothing: antialiased;
-    }
-    .container {
-      width: 100%;
-      max-width: 740px;
-    }
-
-    /* Header & Brand */
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 1.25rem;
-      margin-bottom: 1.25rem;
-    }
-    .header-logo-wrap {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #fdfbf7;
-      padding: 5px 8px;
-      border-radius: 12px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.12);
-      flex-shrink: 0;
-      transition: transform 0.2s ease;
-    }
-    .header-logo-wrap:hover {
-      transform: scale(1.02);
-    }
-    .header-logo {
-      height: 46px;
-      width: auto;
-      max-width: 110px;
-      display: block;
-      border-radius: 4px;
-      object-fit: contain;
-    }
-    .header-text h1 {
-      font-size: 1.65rem;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      color: #ffffff;
-      line-height: 1.2;
-    }
-    p.subtitle {
-      color: var(--muted);
-      font-size: 0.92rem;
-      margin-top: 0.3rem;
-      line-height: 1.4;
-    }
-
-    /* Config Folders Banner */
-    .config-banner {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      background: rgba(11, 17, 32, 0.5);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      border-radius: 8px;
-      padding: 0.5rem 0.85rem;
-      font-size: 0.76rem;
-      color: var(--muted);
-      margin-bottom: 1.5rem;
-      flex-wrap: wrap;
-    }
-
-    /* Panels */
-    .panel {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 1.75rem;
-      margin-bottom: 1.5rem;
-      backdrop-filter: blur(16px);
-      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
-    }
-
-    /* Dropzone */
-    .dropzone {
-      border: 2px dashed #334155;
-      border-radius: 12px;
-      padding: 2.25rem 1.25rem;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-      background: rgba(11, 17, 32, 0.6);
-      position: relative;
-    }
-    .dropzone:hover {
-      border-color: #475569;
-      background: rgba(15, 23, 42, 0.8);
-    }
-    .dropzone.dragover {
-      border-color: var(--accent);
-      background: rgba(56, 189, 248, 0.08);
-      box-shadow: 0 0 25px rgba(56, 189, 248, 0.15);
-      transform: scale(1.005);
-    }
-    .dropzone-icon {
-      width: 48px;
-      height: 48px;
-      color: var(--accent);
-      margin: 0 auto 0.85rem auto;
-      display: block;
-      transition: transform 0.2s ease;
-    }
-    .dropzone:hover .dropzone-icon {
-      transform: translateY(-2px);
-    }
-    .dropzone-title {
-      font-weight: 600;
-      color: var(--text);
-      font-size: 1.05rem;
-      margin-bottom: 0.25rem;
-    }
-    .dropzone-desc {
-      font-size: 0.82rem;
-      color: var(--muted);
-    }
-    input[type="file"] {
-      display: none;
-    }
-
-    /* File Selected State */
-    .file-pill {
-      display: none;
-      align-items: center;
-      justify-content: center;
-      gap: 0.6rem;
-      background: rgba(56, 189, 248, 0.1);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      padding: 0.5rem 1rem;
-      border-radius: 9999px;
-      margin: 0.75rem auto 0 auto;
-      width: fit-content;
-      max-width: 90%;
-    }
-    .file-pill svg {
-      width: 18px;
-      height: 18px;
-      color: var(--accent);
-      flex-shrink: 0;
-    }
-    .file-pill-text {
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: var(--accent);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    /* Controls Grid */
-    .controls {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.25rem;
-      margin-top: 1.5rem;
-    }
-    .control-group label {
-      display: block;
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: var(--muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-    .select-wrap {
-      position: relative;
-    }
-    select {
-      width: 100%;
-      background: var(--input-bg);
-      border: 1px solid #243044;
-      border-radius: 10px;
-      color: var(--text);
-      padding: 0.7rem 2.25rem 0.7rem 0.9rem;
-      font-size: 0.92rem;
-      font-weight: 500;
-      outline: none;
-      appearance: none;
-      -webkit-appearance: none;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    select:hover {
-      border-color: #3b4d66;
-    }
-    select:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
-    }
-    .select-arrow {
-      position: absolute;
-      right: 0.85rem;
-      top: 50%;
-      transform: translateY(-50%);
-      pointer-events: none;
-      width: 16px;
-      height: 16px;
-      color: var(--muted);
-    }
-
-    /* Button */
-    .btn {
-      width: 100%;
-      margin-top: 1.5rem;
-      padding: 0.9rem;
-      border-radius: 10px;
-      border: none;
-      background: var(--accent-gradient);
-      color: #070a12;
-      font-weight: 700;
-      font-size: 1.02rem;
-      cursor: pointer;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.6rem;
-      box-shadow: 0 4px 15px rgba(2, 132, 199, 0.35);
-    }
-    .btn:hover:not(:disabled) {
-      transform: translateY(-1px);
-      box-shadow: 0 6px 20px rgba(2, 132, 199, 0.45);
-    }
-    .btn:active:not(:disabled) {
-      transform: translateY(0);
-    }
-    .btn:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-      box-shadow: none;
-      transform: none;
-    }
-
-    /* Active Job Progress Card */
-    .active-job-card {
-      display: none;
-      background: rgba(14, 23, 42, 0.9);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      border-radius: 14px;
-      padding: 1.25rem 1.5rem;
-      margin-bottom: 1.5rem;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-      animation: fadeIn 0.3s ease;
-    }
-    .active-job-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.75rem;
-    }
-    .active-job-title {
-      font-size: 0.95rem;
-      font-weight: 700;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .active-job-badge {
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: var(--accent);
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      padding: 0.2rem 0.6rem;
-      border-radius: 9999px;
-    }
-    .progress-bar-wrap {
-      background: #0b1120;
-      border: 1px solid #1e293b;
-      height: 10px;
-      border-radius: 9999px;
-      overflow: hidden;
-      margin-bottom: 0.6rem;
-    }
-    .progress-bar-fill {
-      height: 100%;
-      background: var(--accent-gradient);
-      width: 0%;
-      transition: width 0.3s ease;
-      border-radius: 9999px;
-    }
-    .active-job-meta {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.8rem;
-      color: var(--muted);
-    }
-
-    /* Jobs Queue List Section */
-    .jobs-section {
-      margin-top: 1rem;
-    }
-    .jobs-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 1rem;
-    }
-    .jobs-title {
-      font-size: 1.15rem;
-      font-weight: 700;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-    }
-    .jobs-count {
-      font-size: 0.75rem;
-      font-weight: 700;
-      padding: 0.2rem 0.6rem;
-      border-radius: 9999px;
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--muted);
-    }
-    .jobs-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.85rem;
-    }
-    .job-card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 1.1rem 1.25rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 1rem;
-      transition: all 0.2s ease;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    }
-    .job-card:hover {
-      border-color: rgba(255, 255, 255, 0.15);
-      background: rgba(22, 31, 50, 0.9);
-    }
-    .job-info {
-      flex: 1;
-      min-width: 0;
-    }
-    .job-filename {
-      font-size: 0.95rem;
-      font-weight: 700;
-      color: var(--text);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      margin-bottom: 0.3rem;
-    }
-    .job-details {
-      font-size: 0.78rem;
-      color: var(--muted);
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      flex-wrap: wrap;
-    }
-    .job-pill {
-      font-size: 0.7rem;
-      font-weight: 700;
-      padding: 0.15rem 0.5rem;
-      border-radius: 4px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .pill-pending { background: rgba(251, 191, 36, 0.12); color: var(--warning); border: 1px solid rgba(251, 191, 36, 0.3); }
-    .pill-processing { background: rgba(56, 189, 248, 0.12); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.3); }
-    .pill-completed { background: rgba(52, 211, 153, 0.12); color: var(--success); border: 1px solid rgba(52, 211, 153, 0.3); }
-    .pill-failed { background: rgba(248, 113, 113, 0.12); color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.3); }
-
-    .job-actions {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      flex-shrink: 0;
-    }
-    .btn-job {
-      background: #1e293b;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      color: var(--text);
-      font-size: 0.8rem;
-      font-weight: 600;
-      padding: 0.45rem 0.75rem;
-      border-radius: 6px;
-      cursor: pointer;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      transition: all 0.15s ease;
-    }
-    .btn-job:hover {
-      background: #334155;
-    }
-    .btn-job-download {
-      background: var(--success-gradient);
-      color: #022c22;
-      border: none;
-      font-weight: 700;
-    }
-    .btn-job-download:hover {
-      box-shadow: 0 4px 12px rgba(5, 150, 105, 0.35);
-      color: #022c22;
-    }
-    .btn-job-delete {
-      background: transparent;
-      border: none;
-      color: var(--muted);
-      padding: 0.4rem;
-      cursor: pointer;
-      border-radius: 6px;
-    }
-    .btn-job-delete:hover {
-      color: var(--danger);
-      background: rgba(248, 113, 113, 0.1);
-    }
-    .jobs-empty {
-      text-align: center;
-      padding: 2rem;
-      color: var(--muted);
-      font-size: 0.9rem;
-      background: rgba(11, 17, 32, 0.4);
-      border: 1px dashed #243044;
-      border-radius: 12px;
-    }
-
-    /* Terminal Log Modal */
-    .log-modal {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(8px);
-      z-index: 1000;
-      align-items: center;
-      justify-content: center;
-      padding: 1.5rem;
-    }
-    .log-modal-content {
-      background: #05080e;
-      border: 1px solid #1e293b;
-      border-radius: 14px;
-      width: 100%;
-      max-width: 740px;
-      max-height: 85vh;
-      display: flex;
-      flex-direction: column;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
-      overflow: hidden;
-    }
-    .log-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.9rem 1.25rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      background: #090d16;
-    }
-    .log-controls {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .mac-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-    .mac-dot.red { background: #f87171; }
-    .mac-dot.yellow { background: #fbbf24; }
-    .mac-dot.green { background: #34d399; }
-    .log-modal-title {
-      font-size: 0.82rem;
-      font-weight: 700;
-      color: var(--text);
-      margin-left: 0.5rem;
-    }
-    .log-actions {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .btn-log-action {
-      background: #1e293b;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      color: var(--muted);
-      font-size: 0.75rem;
-      font-weight: 600;
-      padding: 0.3rem 0.7rem;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    .btn-log-action:hover {
-      color: var(--text);
-      background: #334155;
-    }
-    .log-path-info {
-      padding: 0.4rem 1.25rem;
-      background: #0a0f1d;
-      font-size: 0.75rem;
-      color: var(--muted);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    .log-body {
-      padding: 1.25rem;
-      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      font-size: 0.82rem;
-      line-height: 1.55;
-      color: #94a3b8;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
-      flex: 1;
-      max-height: calc(85vh - 100px);
-    }
-    .log-line { margin-bottom: 3px; }
-    .log-info { color: #38bdf8; }
-    .log-page { color: #a5b4fc; }
-    .log-success { color: #34d399; font-weight: 700; }
-    .log-warn { color: #fbbf24; }
-    .log-error { color: #f87171; font-weight: 700; }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    @keyframes spin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-    @media (max-width: 600px) {
-      .header { flex-direction: column; text-align: center; gap: 0.75rem; }
-      .controls { grid-template-columns: 1fr; }
-      .job-card { flex-direction: column; align-items: flex-start; }
-      .job-actions { width: 100%; justify-content: flex-end; }
-    }
-  </style>
+    <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div class="container">
@@ -787,13 +212,16 @@ INDEX_HTML = """<!DOCTYPE html>
     <div class="panel">
       <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
         <svg class="dropzone-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
         </svg>
         <div class="dropzone-title" id="dropzoneTitle">Click to select or drag & drop PDF</div>
         <div class="dropzone-desc" id="dropzoneDesc">Supports large multi-page PDFs, handouts, and slides</div>
         <div class="file-pill" id="filePill">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293
+                l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
           </svg>
           <span class="file-pill-text" id="filePillText"></span>
         </div>
@@ -841,7 +269,8 @@ INDEX_HTML = """<!DOCTYPE html>
     <div class="active-job-card" id="activeJobCard">
       <div class="active-job-header">
         <div class="active-job-title">
-          <svg style="width: 18px; height: 18px; animation: spin 1s linear infinite; color: var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg style="width: 18px; height: 18px; animation: spin 1s linear infinite;
+            color: var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity: 0.25;"></circle>
             <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style="opacity: 0.75;"></path>
           </svg>
@@ -866,8 +295,11 @@ INDEX_HTML = """<!DOCTYPE html>
           <span class="jobs-count" id="jobsCountBadge">0</span>
         </div>
         <button class="btn-log-action" onclick="fetchJobs()">
-          <svg style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          <svg style="width: 14px; height: 14px; vertical-align: middle;
+            margin-right: 4px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581
+                m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
           </svg>
           Refresh
         </button>
@@ -924,8 +356,14 @@ INDEX_HTML = """<!DOCTYPE html>
     const logModalTitle = document.getElementById('logModalTitle');
     const logPathInfo = document.getElementById('logPathInfo');
 
-    ['dragenter', 'dragover'].forEach(n => dropzone.addEventListener(n, e => { e.preventDefault(); dropzone.classList.add('dragover'); }));
-    ['dragleave', 'drop'].forEach(n => dropzone.addEventListener(n, e => { e.preventDefault(); dropzone.classList.remove('dragover'); }));
+    ['dragenter', 'dragover'].forEach(n => dropzone.addEventListener(n, e => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    }));
+    ['dragleave', 'drop'].forEach(n => dropzone.addEventListener(n, e => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+    }));
     dropzone.addEventListener('drop', e => {
       if (e.dataTransfer.files.length) handleFileSelected(e.dataTransfer.files[0]);
     });
@@ -933,10 +371,10 @@ INDEX_HTML = """<!DOCTYPE html>
     function handleFileSelected(file) {
       if (!file) return;
       selectedFile = file;
-      const sizeStr = file.size > 1024 * 1024 
+      const sizeStr = file.size > 1024 * 1024
         ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
         : `${(file.size / 1024).toFixed(1)} KB`;
-      
+
       dropzoneTitle.textContent = "File selected (click to change)";
       dropzoneDesc.textContent = "";
       filePillText.textContent = `${file.name} (${sizeStr})`;
@@ -976,7 +414,8 @@ INDEX_HTML = """<!DOCTYPE html>
 
       processBtn.disabled = true;
       processBtn.innerHTML = `
-        <svg style="width: 20px; height: 20px; animation: spin 1s linear infinite;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg style="width: 20px; height: 20px; animation: spin 1s linear infinite;"
+          fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity: 0.25;"></circle>
           <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style="opacity: 0.75;"></path>
         </svg>
@@ -1080,7 +519,11 @@ INDEX_HTML = """<!DOCTYPE html>
                 <span>${sizeStr}</span>
                 <span>•</span>
                 <span>Mode: ${job.mode} (${job.dpi} DPI)</span>
-                ${job.status === 'completed' ? `<span>•</span><span>${job.slides_extracted} slides</span><span>•</span><span>${cbzSizeStr}</span><span>•</span><span>${durationStr}</span>` : ''}
+                ${job.status === 'completed'
+                  ? `<span>•</span><span>${job.slides_extracted} slides</span>` +
+                    `<span>•</span><span>${cbzSizeStr}</span><span>•</span>` +
+                    `<span>${durationStr}</span>`
+                  : ''}
                 ${job.error ? `<span>•</span><span style="color: var(--danger);">${job.error}</span>` : ''}
               </div>
             </div>
@@ -1088,20 +531,25 @@ INDEX_HTML = """<!DOCTYPE html>
               ${job.status === 'completed' ? `
                 <a href="${job.download_url}" download="${job.cbz_filename}" class="btn-job btn-job-download">
                   <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                   </svg>
                   Download .CBZ
                 </a>
               ` : ''}
               <button class="btn-job" onclick="viewJobLogs('${job.id}')">
                 <svg style="width: 14px; height: 14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293
+                      l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
                 Logs
               </button>
               <button class="btn-job-delete" title="Delete job & output file" onclick="deleteJob('${job.id}')">
                 <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7
+                      m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                 </svg>
               </button>
             </div>
@@ -1205,13 +653,19 @@ INDEX_HTML = """<!DOCTYPE html>
 
 
 class HomeResource:
-    async def on_get(self, req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+    """Serve the main HTML UI for the converter application."""
+
+    async def on_get(self, _req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+        """Return the dashboard page for the browser client."""
         resp.content_type = falcon.MEDIA_HTML
         resp.text = INDEX_HTML
 
 
 class ConfigResource:
-    async def on_get(self, req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+    """Expose the configured output and temp directory paths to the frontend."""
+
+    async def on_get(self, _req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+        """Return the current app configuration as JSON."""
         resp.status = falcon.HTTP_200
         resp.media = {
             "outputs_dir": CONFIG["outputs_dir"],
@@ -1221,7 +675,10 @@ class ConfigResource:
 
 
 class StaticResource:
+    """Serve a preloaded static asset from disk."""
+
     def __init__(self, filepath: str, content_type: str):
+        """Cache the file contents in memory for fast repeated response delivery."""
         self.filepath = filepath
         self.content_type = content_type
         self.data = b""
@@ -1229,7 +686,8 @@ class StaticResource:
             with open(filepath, "rb") as f:
                 self.data = f.read()
 
-    async def on_get(self, req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+    async def on_get(self, _req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+        """Return the asset data when present, otherwise a 404 response."""
         if not self.data:
             resp.status = falcon.HTTP_404
             return
@@ -1238,7 +696,10 @@ class StaticResource:
 
 
 class JobsResource:
-    async def on_get(self, req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+    """List queued jobs and accept new upload jobs from the browser client."""
+
+    async def on_get(self, _req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+        """Return a lightweight summary of current jobs and their statuses."""
         cleanup_jobs()
         summary_list = []
         for jid in JOBS_ORDER:
@@ -1268,6 +729,7 @@ class JobsResource:
         resp.media = {"jobs": summary_list}
 
     async def on_post(self, req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+        """Accept a submitted PDF upload and enqueue a conversion job."""
         cleanup_jobs()
         try:
             form = await req.get_media()
@@ -1331,7 +793,10 @@ class JobsResource:
                 "elapsed_ms": 0,
                 "cbz_size_bytes": 0,
                 "download_url": f"/download/{job_id}",
-                "logs": [f"[{time.strftime('%H:%M:%S')}] [UPLOAD] Uploaded '{filename}' ({bytes_written / 1024:.1f} KB). Queued."],
+                "logs": [
+                  f"[{time.strftime('%H:%M:%S')}] [UPLOAD] Uploaded "
+                  f"'{filename}' ({bytes_written / 1024:.1f} KB). Queued."
+                ],
                 "error": None,
                 "created_at": time.time(),
                 "updated_at": time.time(),
@@ -1344,7 +809,7 @@ class JobsResource:
             try:
                 with open(log_path, "w", encoding="utf-8") as lf:
                     lf.write(job["logs"][0] + "\n")
-            except Exception:
+            except OSError:
                 pass
 
             # Spawn background execution in thread pool without blocking ASGI loop
@@ -1359,13 +824,16 @@ class JobsResource:
                 "filename": filename,
                 "message": "Job enqueued successfully",
             }
-        except Exception as e:
+        except (OSError, UnicodeError, ValueError, TypeError, KeyError, RuntimeError) as e:
             resp.status = falcon.HTTP_500
             resp.media = {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
 
 
 class JobDetailResource:
-    async def on_get(self, req: falcon.asgi.Request, resp: falcon.asgi.Response, job_id: str) -> None:
+    """Return job metadata or delete a queued job and its derived files."""
+
+    async def on_get(self, _req: falcon.asgi.Request, resp: falcon.asgi.Response, job_id: str) -> None:
+        """Return the full metadata and logs for a specific job."""
         j = JOBS.get(job_id)
         if not j:
             resp.status = falcon.HTTP_404
@@ -1395,7 +863,8 @@ class JobDetailResource:
             "created_at": j["created_at"],
         }
 
-    async def on_delete(self, req: falcon.asgi.Request, resp: falcon.asgi.Response, job_id: str) -> None:
+    async def on_delete(self, _req: falcon.asgi.Request, resp: falcon.asgi.Response, job_id: str) -> None:
+        """Delete a job and any output or temp files created for it."""
         j = JOBS.pop(job_id, None)
         if job_id in JOBS_ORDER:
             JOBS_ORDER.remove(job_id)
@@ -1405,13 +874,13 @@ class JobDetailResource:
             if cbz_p and os.path.isfile(cbz_p):
                 try:
                     os.remove(cbz_p)
-                except Exception:
+                except OSError:
                     pass
             tmp_p = j.get("temp_pdf_path")
             if tmp_p and os.path.isfile(tmp_p):
                 try:
                     os.remove(tmp_p)
-                except Exception:
+                except OSError:
                     pass
 
         resp.status = falcon.HTTP_200
@@ -1419,7 +888,10 @@ class JobDetailResource:
 
 
 class DownloadResource:
-    async def on_get(self, req: falcon.asgi.Request, resp: falcon.asgi.Response, job_id: str) -> None:
+    """Serve a completed CBZ file for download."""
+
+    async def on_get(self, _req: falcon.asgi.Request, resp: falcon.asgi.Response, job_id: str) -> None:
+        """Return the generated CBZ output file to the browser client."""
         j = JOBS.get(job_id)
         if not j or j.get("status") != "completed":
             resp.status = falcon.HTTP_404
@@ -1470,6 +942,8 @@ app.add_route("/download/{job_id}", DownloadResource())
 # Serve initial assets
 logo_path = os.path.join(ASSETS_DIR, "logo.jpg")
 fav_path = os.path.join(ASSETS_DIR, "favicon.png")
+styles_path = os.path.join(BASE_DIR, "styles.css")
+app.add_route("/styles.css", StaticResource(styles_path, "text/css"))
 app.add_route("/logo.jpg", StaticResource(logo_path, "image/jpeg"))
 app.add_route("/favicon.png", StaticResource(fav_path, "image/png"))
 app.add_route("/favicon.ico", StaticResource(fav_path, "image/png"))

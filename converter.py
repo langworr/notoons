@@ -1,7 +1,4 @@
-"""
-Unified PDF to CBZ Converter with Real-time Logging & Robust Error Handling.
-Combines PyMuPDF speed and smart multi-slide grid detection.
-"""
+"""Convert PDF files to CBZ archives with rendering, embedded-image extraction, and slide detection."""
 
 import argparse
 import io
@@ -15,7 +12,7 @@ from PIL import Image, ImageChops, ImageStat
 
 
 def find_content_bands(brightness_1d, threshold=238, min_size=50):
-    """Find contiguous non-white bands in a 1D brightness array."""
+    """Return the start/end indexes of contiguous content bands below a brightness threshold."""
     in_content = False
     bands = []
     start = 0
@@ -33,11 +30,7 @@ def find_content_bands(brightness_1d, threshold=238, min_size=50):
 
 
 def detect_slide_grid(pil_img, threshold=238, min_row_size=50, min_col_size=80):
-    """
-    Detect multiple slides arranged in a grid on a single page.
-    Uses C-accelerated Pillow box-resampling for instantaneous 1D projection.
-    Returns list of (x1, y1, x2, y2) crop boxes, or empty list.
-    """
+    """Detect slide regions arranged in a grid and return crop boxes plus grid dimensions."""
     gray = pil_img.convert("L")
     w, h = gray.size
 
@@ -59,7 +52,7 @@ def detect_slide_grid(pil_img, threshold=238, min_row_size=50, min_col_size=80):
 
 
 def images_match(img_bytes_a, img_bytes_b, resize=(300, 300), threshold=0.90):
-    """Fast similarity check using Pillow's C-accelerated ImageChops.difference."""
+    """Return whether two images are visually similar using a normalized difference score."""
     try:
         a = Image.open(io.BytesIO(img_bytes_a)).convert("RGB").resize(resize, Image.Resampling.BILINEAR)
         b = Image.open(io.BytesIO(img_bytes_b)).convert("RGB").resize(resize, Image.Resampling.BILINEAR)
@@ -68,15 +61,12 @@ def images_match(img_bytes_a, img_bytes_b, resize=(300, 300), threshold=0.90):
         diff_mean = sum(stat.mean) / 3.0
         similarity = 1.0 - (diff_mean / 255.0)
         return similarity >= threshold, similarity
-    except Exception:
+    except (OSError, ValueError, TypeError):
         return False, 0.0
 
 
 def extract_or_render_page(page, doc, dpi=200, jpeg_quality=92, prefer_embedded=True):
-    """
-    Extracts embedded full-page image directly if present and matching;
-    otherwise renders the page pixmap via PyMuPDF.
-    """
+    """Prefer a matching embedded page image, otherwise render the page as JPEG."""
     if prefer_embedded:
         try:
             images = page.get_images(full=True)
@@ -89,7 +79,7 @@ def extract_or_render_page(page, doc, dpi=200, jpeg_quality=92, prefer_embedded=
                     xref = img[0]
                     try:
                         w, h = img[2], img[3]
-                    except Exception:
+                    except (IndexError, TypeError, KeyError):
                         d = doc.extract_image(xref)
                         w, h = d.get("width", 0), d.get("height", 0)
 
@@ -112,7 +102,7 @@ def extract_or_render_page(page, doc, dpi=200, jpeg_quality=92, prefer_embedded=
                     matches, _ = images_match(raw_bytes, thumb_bytes, threshold=0.90)
                     if matches:
                         return raw_bytes, ext, "extracted_raw"
-        except Exception:
+        except (OSError, ValueError, TypeError, KeyError, IndexError, RuntimeError):
             pass
 
     # Direct high-speed PyMuPDF render (alpha=False ensures RGB compatibility)
@@ -131,9 +121,7 @@ def convert_pdf(
     logger=None,
     progress_callback=None,
 ):
-    """
-    Convert a PDF (file path or bytes) to a CBZ archive with detailed step-by-step logging.
-    """
+    """Convert a PDF source into a CBZ archive and return summary metadata."""
     logs = []
 
     def log(msg):
@@ -143,7 +131,7 @@ def convert_pdf(
         if logger:
             try:
                 logger(entry)
-            except Exception:
+            except (OSError, ValueError, TypeError, RuntimeError):
                 pass
         print(entry, flush=True)
 
@@ -158,12 +146,12 @@ def convert_pdf(
             size_kb = os.path.getsize(pdf_source) / 1024
             log(f"[INFO] Opening PDF from file: '{pdf_source}' ({size_kb:.1f} KB)")
             doc = pymupdf.open(pdf_source)
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError) as e:
         log(f"[ERROR] Failed to open PDF document: {e}")
         log(traceback.format_exc())
         raise
 
-    if doc.is_encrypted:
+    if getattr(doc, "is_encrypted", False):
         log("[WARN] Document is encrypted, attempting blank password authentication...")
         if not doc.authenticate(""):
             log("[ERROR] PDF is password-protected and cannot be opened.")
@@ -194,7 +182,7 @@ def convert_pdf(
             if progress_callback:
                 try:
                     progress_callback(page_num, total_pages, len(slide_records))
-                except Exception:
+                except (OSError, TypeError, ValueError, RuntimeError):
                     pass
             continue
 
@@ -203,7 +191,7 @@ def convert_pdf(
             pix = page.get_pixmap(dpi=dpi, alpha=False)
             page_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
             boxes, r_count, c_count = detect_slide_grid(page_img)
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError, TypeError) as e:
             log(f"[PAGE {page_num}/{total_pages}] Grid analysis exception: {e}. Falling back to standard render.")
             boxes = []
 
@@ -214,8 +202,13 @@ def convert_pdf(
                 buf = io.BytesIO()
                 slide.save(buf, format="JPEG", quality=jpeg_quality)
                 slide_bytes = buf.getvalue()
-                slide_records.append((slide_bytes, "jpg", f"Page {page_num} - Slide {b_idx} ({slide.width}x{slide.height})"))
-                log(f"  -> Slide {b_idx}/{len(boxes)}: {slide.width}x{slide.height} px ({len(slide_bytes)/1024:.1f} KB)")
+                slide_records.append(
+                    (slide_bytes, "jpg", f"Page {page_num} - Slide {b_idx} ({slide.width}x{slide.height})")
+                )
+                log(
+                    f"  -> Slide {b_idx}/{len(boxes)}: {slide.width}x{slide.height} px "
+                    f"({len(slide_bytes)/1024:.1f} KB)"
+                )
         else:
             # Single slide page
             if prefer_embedded:
@@ -224,27 +217,32 @@ def convert_pdf(
                 )
                 if src == "extracted_raw":
                     slide_records.append((data, ext, f"Page {page_num} (raw embedded)"))
-                    log(f"[PAGE {page_num}/{total_pages}] Direct-extracted full slide image (0 ms re-encoding, {len(data)/1024:.1f} KB)")
+                    log(
+                        f"[PAGE {page_num}/{total_pages}] Direct-extracted full slide image "
+                        f"(0 ms re-encoding, {len(data)/1024:.1f} KB)"
+                    )
                     if progress_callback:
                         try:
                             progress_callback(page_num, total_pages, len(slide_records))
-                        except Exception:
+                        except (OSError, TypeError, ValueError, RuntimeError):
                             pass
                     continue
 
             # Rendered JPEG directly from PyMuPDF
             jpg_data = pix.tobytes("jpg", jpg_quality=jpeg_quality)
             slide_records.append((jpg_data, "jpg", f"Page {page_num} (rendered)"))
-            log(f"[PAGE {page_num}/{total_pages}] Rendered single slide ({pix.width}x{pix.height} px, {len(jpg_data)/1024:.1f} KB)")
+            log(
+                f"[PAGE {page_num}/{total_pages}] Rendered single slide "
+                f"({pix.width}x{pix.height} px, {len(jpg_data)/1024:.1f} KB)"
+            )
 
         if progress_callback:
             try:
                 progress_callback(page_num, total_pages, len(slide_records))
-            except Exception:
+            except (OSError, TypeError, ValueError, RuntimeError):
                 pass
 
     doc.close()
-
 
     total_slides = len(slide_records)
     digits = max(3, len(str(total_slides)))
@@ -253,10 +251,10 @@ def convert_pdf(
     target_stream = io.BytesIO() if output_cbz_path is None else output_cbz_path
     try:
         with zipfile.ZipFile(target_stream, "w", compression=zipfile.ZIP_STORED) as cbz:
-            for idx, (data, ext, label) in enumerate(slide_records, start=1):
+            for idx, (data, ext, _) in enumerate(slide_records, start=1):
                 entry_name = f"slide-{idx:0{digits}d}.{ext}"
                 cbz.writestr(entry_name, data)
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile) as e:
         log(f"[ERROR] Failed to assemble CBZ archive: {e}")
         log(traceback.format_exc())
         raise
@@ -286,6 +284,7 @@ def convert_pdf(
 
 
 def main():
+    """Command-line entry point for converting a PDF to a CBZ archive."""
     parser = argparse.ArgumentParser(description="Convert PDF to CBZ with high-speed rendering & smart grid detection.")
     parser.add_argument("pdf_path", help="Path to input PDF file")
     parser.add_argument("-o", "--output", help="Path to output CBZ file (default: <pdf_name>.cbz)")

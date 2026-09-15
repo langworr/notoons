@@ -1,13 +1,16 @@
+"""Convert PDF pages or slide grids into CBZ archives or individual image files."""
+
+import io
+import os
 import sys
 import zipfile
-import os
+
 import numpy as np
 from pdf2image import convert_from_path
-from PIL import Image
 
 
 def find_content_bands(brightness_1d, threshold=238, min_size=50):
-    """Find contiguous content (non-white) bands in a 1D brightness array."""
+    """Return contiguous bands where brightness stays below the chosen threshold."""
     in_content = False
     bands = []
     start = 0
@@ -25,11 +28,7 @@ def find_content_bands(brightness_1d, threshold=238, min_size=50):
 
 
 def detect_slide_grid(page_img, threshold=238):
-    """
-    Auto-detect the slide grid in a PDF page that contains
-    multiple slides arranged in a 2D grid.
-    Returns list of (x1, y1, x2, y2) crop boxes for each slide.
-    """
+    """Detect slide crop boxes on a page by scanning row and column brightness bands."""
     arr = np.array(page_img.convert("L"))
 
     row_brightness = arr.mean(axis=1)
@@ -47,12 +46,7 @@ def detect_slide_grid(page_img, threshold=238):
 
 
 def pdf_to_cbz(pdf_path, dpi=200, mode="slides"):
-    """
-    Convert a PDF to CBZ.
-
-    mode="slides"  -> extract individual slides from multi-slide-per-page PDFs
-    mode="pages"   -> render each full page as one image (original behaviour)
-    """
+    """Convert a PDF to a CBZ archive, either page-by-page or by splitting slide grids."""
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
     cbz_name = base_name + "_slide.cbz"
 
@@ -80,7 +74,6 @@ def pdf_to_cbz(pdf_path, dpi=200, mode="slides"):
     with zipfile.ZipFile(cbz_name, "w", compression=zipfile.ZIP_STORED) as cbz:
         for idx, img in enumerate(images):
             img_name = f"slide-{idx:0{digits}d}.jpg"
-            import io
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=92)
             cbz.writestr(img_name, buf.getvalue())
@@ -91,13 +84,7 @@ def pdf_to_cbz(pdf_path, dpi=200, mode="slides"):
 
 
 def pdf_to_images(pdf_path, output_dir=None, dpi=200, mode="slides", fmt="jpg"):
-    """
-    Extract slides (or pages) as individual image files.
-
-    mode="slides"  -> extract individual slides from multi-slide-per-page PDFs
-    mode="pages"   -> render each full page as one image
-    fmt            -> "jpg" or "png"
-    """
+    """Export a PDF as individual slide or page images to a target directory."""
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
 
     if output_dir is None:
@@ -135,6 +122,7 @@ def pdf_to_images(pdf_path, output_dir=None, dpi=200, mode="slides", fmt="jpg"):
 
 
 def print_help():
+    """Display the CLI usage instructions for the converter script."""
     print("""
 Uso: python convert.py [opzioni] <pdf_path>
 
@@ -161,47 +149,47 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Parse options
-    mode = "slides"
+    mode_ = "slides"
     output = "cbz"
-    dpi = 200
-    fmt = "jpg"
-    pdf_path = None
+    dpi_ = 200
+    fmt_ = "jpg"
+    pdf_path_ = None
 
     i = 0
     while i < len(args):
         if args[i] == "--mode" and i + 1 < len(args):
-            mode = args[i + 1]
+            mode_ = args[i + 1]
             i += 2
         elif args[i] == "--output" and i + 1 < len(args):
             output = args[i + 1]
             i += 2
         elif args[i] == "--dpi" and i + 1 < len(args):
-            dpi = int(args[i + 1])
+            dpi_ = int(args[i + 1])
             i += 2
         elif args[i] == "--fmt" and i + 1 < len(args):
-            fmt = args[i + 1]
+            fmt_ = args[i + 1]
             i += 2
         else:
-            pdf_path = args[i]
+            pdf_path_ = args[i]
             i += 1
 
-    if pdf_path is None:
+    if pdf_path_ is None:
         print("Errore: specificare il percorso del PDF.")
         print_help()
         sys.exit(1)
 
-    if not os.path.exists(pdf_path):
-        print(f"Errore: file non trovato: {pdf_path}")
+    if not os.path.exists(pdf_path_):
+        print(f"Errore: file non trovato: {pdf_path_}")
         sys.exit(1)
 
-    if mode not in ("slides", "pages"):
-        print(f"Errore: --mode deve essere 'slides' o 'pages', non '{mode}'")
+    if mode_ not in ("slides", "pages"):
+        print(f"Errore: --mode deve essere 'slides' o 'pages', non '{mode_}'")
         sys.exit(1)
 
     if output == "cbz":
-        pdf_to_cbz(pdf_path, dpi=dpi, mode=mode)
+        pdf_to_cbz(pdf_path_, dpi=dpi_, mode=mode_)
     elif output == "images":
-        pdf_to_images(pdf_path, dpi=dpi, mode=mode, fmt=fmt)
+        pdf_to_images(pdf_path_, dpi=dpi_, mode=mode_, fmt=fmt_)
     else:
         print(f"Errore: --output deve essere 'cbz' o 'images', non '{output}'")
         sys.exit(1)
