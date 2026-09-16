@@ -1,0 +1,147 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/static/images/favicon.png">
+  <title>Notoons - PDF to CBZ Converter</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-logo-wrap">
+        <img class="header-logo" src="/static/images/logo.jpg" alt="notoons logo" onerror="this.parentElement.style.display='none'">
+      </div>
+      <div class="header-text">
+        <h1>notoons</h1>
+        <p class="subtitle">Fast asynchronous PDF & handout converter to CBZ.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+        <svg class="dropzone-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+        </svg>
+        <div class="dropzone-title" id="dropzoneTitle">Click to select or drag & drop PDF</div>
+        <div class="dropzone-desc" id="dropzoneDesc">Supports large multi-page PDFs, handouts, and slides</div>
+        <div class="file-pill" id="filePill">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293
+                l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          <span class="file-pill-text" id="filePillText"></span>
+        </div>
+        <input type="file" id="fileInput" accept=".pdf,application/pdf" onchange="handleFileSelected(this.files[0])" />
+      </div>
+
+      <div class="controls">
+        <div class="control-group">
+          <label>Extraction Mode</label>
+          <div class="select-wrap">
+            <select id="modeSelect">
+              <option value="auto" selected>Auto (Detect Grids & Handouts)</option>
+              <option value="pages">Pages (1 Page = 1 Slide)</option>
+              <option value="slides">Force Grid Slicing</option>
+            </select>
+            <svg class="select-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Rendering Resolution</label>
+          <div class="select-wrap">
+            <select id="dpiSelect">
+              <option value="150">150 DPI (Fast & Light)</option>
+              <option value="200" selected>200 DPI (Balanced Quality)</option>
+              <option value="300">300 DPI (High Definition)</option>
+            </select>
+            <svg class="select-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <button id="processBtn" class="btn" disabled onclick="submitUploadJob()">
+        <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        Queue Conversion Job
+      </button>
+    </div>
+
+    <!-- Active Job Live Progress Banner -->
+    <div class="active-job-card" id="activeJobCard">
+      <div class="active-job-header">
+        <div class="active-job-title">
+          <svg style="width: 18px; height: 18px; animation: spin 1s linear infinite;
+            color: var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity: 0.25;"></circle>
+            <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style="opacity: 0.75;"></path>
+          </svg>
+          <span id="activeJobName">Processing...</span>
+        </div>
+        <span class="active-job-badge" id="activeJobPct">0%</span>
+      </div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="activeProgressBar"></div>
+      </div>
+      <div class="active-job-meta">
+        <span id="activeJobPage">Page 0 / 0</span>
+        <span id="activeJobSlides">0 slides extracted</span>
+      </div>
+    </div>
+
+    <!-- Jobs Queue Section -->
+    <div class="jobs-section">
+      <div class="jobs-header">
+        <div class="jobs-title">
+          <span>Conversion Jobs</span>
+          <span class="jobs-count" id="jobsCountBadge">0</span>
+        </div>
+        <button class="btn-log-action" onclick="fetchJobs()">
+          <svg style="width: 14px; height: 14px; vertical-align: middle;
+            margin-right: 4px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581
+                m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+
+      <div class="jobs-list" id="jobsList">
+        <div class="jobs-empty">No jobs queued yet. Upload a PDF above to begin.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terminal Log Modal -->
+  <div class="log-modal" id="logModal" onclick="closeLogModal(event)">
+    <div class="log-modal-content" onclick="event.stopPropagation()">
+      <div class="log-header">
+        <div class="log-controls">
+          <span class="mac-dot red" onclick="closeLogModal()"></span>
+          <span class="mac-dot yellow"></span>
+          <span class="mac-dot green"></span>
+          <span class="log-modal-title" id="logModalTitle">Job Execution Log</span>
+        </div>
+        <div class="log-actions">
+          <button class="btn-log-action" onclick="copyCurrentModalLogs()">Copy Log</button>
+          <button class="btn-log-action" onclick="closeLogModal()">Close</button>
+        </div>
+      </div>
+      <div class="log-path-info" id="logPathInfo"></div>
+      <div class="log-body" id="logModalBody"></div>
+    </div>
+  </div>
+  
+  <script src="/static/js/client-side.js"></script>
+</body>
+</html>
