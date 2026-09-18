@@ -72,16 +72,31 @@ function resetDropzone() {
 }
 
 async function loadConfig() {
+  const outputDirSelect = document.getElementById('outputDirSelect');
   try {
     const res = await fetch('/config');
+    if (!res.ok) throw new Error(`Config request failed (${res.status})`);
     const data = await res.json();
-    if (data.outputs_dir) {
+    const outputDirectories = Array.isArray(data.outputs_dir)
+      ? data.outputs_dir
+      : data.outputs_dir
+        ? [{ nickname: data.outputs_dir, path: data.outputs_dir }]
+        : [];
+    if (outputDirectories.length) {
+      outputDirSelect.innerHTML = outputDirectories.map(dir =>
+        `<option value="${dir.nickname}">${dir.nickname}</option>`
+      ).join('');
       const cfgOutputs = document.getElementById('cfgOutputs');
       const cfgLogs = document.getElementById('cfgLogs');
-      if (cfgOutputs) cfgOutputs.textContent = data.outputs_dir;
+      if (cfgOutputs) cfgOutputs.textContent = outputDirectories.map(dir => dir.nickname).join(', ');
       if (cfgLogs) cfgLogs.textContent = data.logs_dir;
+    } else {
+      outputDirSelect.innerHTML = '<option value="" selected>No output directories configured</option>';
+      outputDirSelect.disabled = true;
     }
   } catch (err) {
+    outputDirSelect.innerHTML = '<option value="" selected>Unable to load output directories</option>';
+    outputDirSelect.disabled = true;
     console.error('Error fetching config:', err);
   }
 }
@@ -92,6 +107,7 @@ async function submitUploadJob() {
   const fileToUpload = selectedFile;
   const mode = document.getElementById('modeSelect').value;
   const dpi = document.getElementById('dpiSelect').value;
+  const outputDir = document.getElementById('outputDirSelect').value;
   const processBtn = document.getElementById('processBtn');
 
   processBtn.disabled = true;
@@ -108,6 +124,7 @@ async function submitUploadJob() {
   formData.append('file', fileToUpload);
   formData.append('mode', mode);
   formData.append('dpi', dpi);
+  formData.append('output_dir', outputDir);
 
   try {
     const res = await fetch('/jobs', { method: 'POST', body: formData });

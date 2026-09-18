@@ -85,6 +85,9 @@ class JobsResource:
             Optional integer rendering resolution.  The default is ``200``;
             values that cannot be parsed as integers leave the default in
             place.
+        ``output_dir``
+            Optional configured output-directory nickname.  The first
+            configured directory is used when omitted.
 
         A valid upload creates a pending job, writes an initial log entry,
         schedules background conversion, and returns its identifier.  An
@@ -109,6 +112,7 @@ class JobsResource:
             filename = "document.pdf"
             mode = "auto"
             dpi = 200
+            output_dir_nickname = CONFIG["outputs_dir"][0]["nickname"]
             bytes_written = 0
 
             async for part in form:
@@ -131,6 +135,10 @@ class JobsResource:
                         dpi = int(val)
                     except ValueError:
                         pass
+                elif part.name == "output_dir":
+                    value = await part.get_text()
+                    if any(item["nickname"] == value for item in CONFIG["outputs_dir"]):
+                        output_dir_nickname = value
 
             if bytes_written == 0 or not os.path.isfile(temp_pdf_path):
                 if os.path.isfile(temp_pdf_path):
@@ -141,13 +149,18 @@ class JobsResource:
 
             base_name = os.path.splitext(filename)[0]
             cbz_name = f"{base_name}.cbz"
-            cbz_path = os.path.join(CONFIG["outputs_dir"], f"{job_id}_{cbz_name}")
+            output_dir = next(
+                item["path"] for item in CONFIG["outputs_dir"]
+                if item["nickname"] == output_dir_nickname
+            )
+            cbz_path = os.path.join(output_dir, f"{job_id}_{cbz_name}")
             log_path = os.path.join(CONFIG["logs_dir"], f"{job_id}_{base_name}.log")
 
             job = {
                 "id": job_id,
                 "filename": filename,
                 "cbz_filename": cbz_name,
+                "output_dir": output_dir_nickname,
                 "cbz_path": cbz_path,
                 "log_path": log_path,
                 "temp_pdf_path": temp_pdf_path,
@@ -224,6 +237,7 @@ class JobDetailResource:
             "id": j["id"],
             "filename": j["filename"],
             "cbz_filename": j["cbz_filename"],
+            "output_dir": j["output_dir"],
             "status": j["status"],
             "mode": j["mode"],
             "dpi": j["dpi"],

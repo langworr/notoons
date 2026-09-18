@@ -3,7 +3,7 @@
 # Relative paths are resolved relative to the application directory.
 # Absolute paths (e.g. C:\Data\notoons\outputs) are also supported.
 
-outputs_dir = outputs
+outputs_dir = [{"nickname": "Default", "path": "outputs"}, {"nickname": "Archive", "path": "outputs/archive"}]
 logs_dir = logs
 temp_dir = temp
 
