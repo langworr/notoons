@@ -27,7 +27,7 @@ def add_routes(app: falcon.asgi.App, oidc: OIDCClient) -> None:
     ``GET /``
         Serves the application's HTML interface.
     ``GET /config``
-        Returns the configured output, log, and temporary directories.
+        Returns the named output directories and configured log/temp paths.
     ``GET /auth/login``
         Starts the OIDC authorization-code flow.
     ``GET /auth/callback``

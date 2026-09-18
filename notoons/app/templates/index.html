@@ -66,6 +66,17 @@
             </svg>
           </div>
         </div>
+        <div class="control-group">
+          <label>Output Directory</label>
+          <div class="select-wrap">
+            <select id="outputDirSelect">
+              <option value="" selected>Loading output directories...</option>
+            </select>
+            <svg class="select-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </div>
+        </div>
       </div>
 
       <button id="processBtn" class="btn" disabled onclick="submitUploadJob()">
@@ -142,6 +153,6 @@
     </div>
   </div>
   
-  <script src="/static/js/client-side.js"></script>
+  <script src="/static/js/client-side.js?v=20260918"></script>
 </body>
 </html>

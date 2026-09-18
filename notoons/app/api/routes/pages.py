@@ -50,8 +50,9 @@ class ConfigResource:
         """Return the configured output, log, and temporary directories.
 
         The response reflects the process-wide values loaded into
-        :data:`notoons.app.config.CONFIG`.  Paths are returned as JSON fields
-        named ``outputs_dir``, ``logs_dir``, and ``temp_dir``.
+        :data:`notoons.app.config.CONFIG`.  ``outputs_dir`` is a list of
+        named ``nickname`` and absolute ``path`` records; ``logs_dir`` and
+        ``temp_dir`` remain single absolute paths.
 
         Args:
             _req: Falcon request object, unused by this handler.

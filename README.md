@@ -3,6 +3,14 @@ a web tool to convert notes and pdf into cbz and, eventually in the future, othe
 
 ## OpenID Connect login
 
+Output directories are configured as a JSON array. Each entry needs a
+nickname, which is shown in the web UI, and a path relative to the application
+directory or an absolute path:
+
+```ini
+outputs_dir = [{"nickname": "Default", "path": "outputs"}, {"nickname": "Archive", "path": "outputs/archive"}]
+```
+
 The application supports the OIDC authorization-code flow with PKCE. Configure
 the OIDC values in `config.txt`:
 
