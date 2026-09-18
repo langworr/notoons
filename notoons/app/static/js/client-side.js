@@ -332,3 +332,16 @@ async function deleteJob(jobId) {
     console.error('Error deleting job:', err);
   }
 }
+
+function toggleUserDropdown(event) {
+  event.stopPropagation();
+  const container = event.currentTarget.parentElement;
+  container.classList.toggle('active');
+}
+
+document.addEventListener('click', function (event) {
+  const container = document.querySelector('.user-dropdown-container');
+  if (container && container.classList.contains('active')) {
+    container.classList.remove('active');
+  }
+});
