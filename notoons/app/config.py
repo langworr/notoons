@@ -1,8 +1,9 @@
 """Load and normalize runtime directory configuration for Notoons.
 
-Configuration values are read from ``config/config.txt`` relative to the
-application base directory, with a fallback to ``config.txt`` directly under
-that directory.  Environment variables can override values from the file.
+    Configuration values are read from ``config/config.txt`` relative to the
+    application base directory, with fallbacks to ``config.txt`` under the
+    application directory and repository root.  Environment variables can
+    override values from the file.
 The resulting paths are absolute, and the required directories are created
 when this module is imported.
 """
@@ -16,20 +17,22 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def load_config() -> dict:
     """Load runtime directories from a configuration file and the environment.
 
-    The supported configuration keys are ``outputs_dir``, ``logs_dir``, and
-    ``temp_dir``.  Each key may be written as either ``key=value`` or
-    ``key:value``.  Blank lines and lines beginning with ``#``, ``;``, or
-    ``//`` are ignored.  Unknown keys do not affect the returned mapping.
+    The supported configuration keys are ``outputs_dir``, ``logs_dir``,
+    ``temp_dir``, ``oidc_issuer_url``, ``oidc_client_id``,
+    ``oidc_client_secret``, ``oidc_redirect_uri``, ``oidc_session_secret``,
+    ``oidc_scopes``, and ``oidc_cookie_secure``.  Each key may be written as
+    either ``key=value`` or ``key:value``.  Blank lines and lines beginning
+    with ``#``, ``;``, or ``//`` are ignored.  Unknown keys do not affect the
+    returned mapping.
 
     Configuration is applied in the following order:
 
     1. Built-in relative directory names are used as defaults.
     2. ``config/config.txt`` is read from :data:`BASE_DIR` when available.
     3. ``config.txt`` directly under :data:`BASE_DIR` is used as a fallback.
-    4. Environment variables override file values.  The preferred names are
-       ``NOTOONS_OUTPUTS_DIR``, ``NOTOONS_LOGS_DIR``, and
-       ``NOTOONS_TEMP_DIR``; the shorter ``OUTPUTS_DIR``, ``LOGS_DIR``, and
-       ``TEMP_DIR`` names are accepted as secondary fallbacks.
+     4. Environment variables override file values.  ``NOTOONS_*`` names are
+         preferred for all settings; legacy short names remain supported for
+         the directory settings.
 
     Relative paths are resolved against :data:`BASE_DIR`.  All three
     directories are created with :func:`os.makedirs` before the mapping is
@@ -48,10 +51,19 @@ def load_config() -> dict:
         "outputs_dir": "outputs",
         "logs_dir": "logs",
         "temp_dir": "temp",
+        "oidc_issuer_url": "",
+        "oidc_client_id": "",
+        "oidc_client_secret": "",
+        "oidc_redirect_uri": "",
+        "oidc_session_secret": "",
+        "oidc_scopes": "openid profile email",
+        "oidc_cookie_secure": "true",
     }
     config_file = os.path.join(BASE_DIR, "config", "config.txt")
     if not os.path.isfile(config_file):
         config_file = os.path.join(BASE_DIR, "config.txt")
+    if not os.path.isfile(config_file):
+        config_file = os.path.join(os.path.dirname(BASE_DIR), "config.txt")
 
     if os.path.isfile(config_file):
         try:
@@ -76,6 +88,16 @@ def load_config() -> dict:
     cfg["outputs_dir"] = os.getenv("NOTOONS_OUTPUTS_DIR", os.getenv("OUTPUTS_DIR", cfg["outputs_dir"]))
     cfg["logs_dir"] = os.getenv("NOTOONS_LOGS_DIR", os.getenv("LOGS_DIR", cfg["logs_dir"]))
     cfg["temp_dir"] = os.getenv("NOTOONS_TEMP_DIR", os.getenv("TEMP_DIR", cfg["temp_dir"]))
+    for key in (
+        "oidc_issuer_url",
+        "oidc_client_id",
+        "oidc_client_secret",
+        "oidc_redirect_uri",
+        "oidc_session_secret",
+        "oidc_scopes",
+        "oidc_cookie_secure",
+    ):
+        cfg[key] = os.getenv(f"NOTOONS_{key.upper()}", cfg[key])
 
     for k in ["outputs_dir", "logs_dir", "temp_dir"]:
         if not os.path.isabs(cfg[k]):

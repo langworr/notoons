@@ -7,3 +7,13 @@ outputs_dir = outputs
 logs_dir = logs
 temp_dir = temp
 
+# OpenID Connect settings.
+# Register this callback URL with your identity provider.
+oidc_issuer_url = https://identity.example.com/realms/notoons
+oidc_client_id = notoons
+oidc_client_secret = CHANGE_ME
+oidc_redirect_uri = http://127.0.0.1:8000/auth/callback
+oidc_session_secret = CHANGE_ME_TO_A_LONG_RANDOM_VALUE
+oidc_scopes = openid profile email
+oidc_cookie_secure = false
+

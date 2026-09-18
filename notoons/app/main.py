@@ -11,6 +11,8 @@ import falcon.asgi
 from falcon.media.multipart import MultipartFormHandler
 
 from .config import BASE_DIR
+from .auth import OIDCClient
+from .middleware import AuthenticationMiddleware
 from .state import cleanup_temp_dir
 from .api.router import add_routes
 
@@ -45,6 +47,8 @@ def create_app() -> falcon.asgi.App:
             configuration settings.
     """
     app_ = falcon.asgi.App()
+    oidc = OIDCClient()
+    app_.add_middleware(AuthenticationMiddleware(oidc))
 
     # Configurazione Parser Multipart (fino ad 1GB per caricamento PDF)
     multipart_handler = MultipartFormHandler()
@@ -57,7 +61,7 @@ def create_app() -> falcon.asgi.App:
     app_.add_static_route("/static", static_dir)
 
     # Registra tutte le rotte dell'app
-    add_routes(app_)
+    add_routes(app_, oidc)
 
     return app_
 
