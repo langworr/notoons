@@ -4,7 +4,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import time
 from typing import Any
@@ -34,6 +33,7 @@ class OIDCClient:
         self.client_id = CONFIG["oidc_client_id"]
         self.client_secret = CONFIG["oidc_client_secret"]
         self.redirect_uri = CONFIG["oidc_redirect_uri"]
+        self.post_logout_redirect_uri = CONFIG.get("oidc_post_logout_redirect_uri", "")
         self.scopes = CONFIG["oidc_scopes"]
         self.session_secret = CONFIG["oidc_session_secret"]
         self.cookie_secure = CONFIG["oidc_cookie_secure"].lower() == "true"
@@ -134,6 +134,38 @@ class OIDCClient:
         }
         return f"{discovery['authorization_endpoint']}?{urlencode(params)}"
 
+    async def logout_url(
+        self,
+        id_token_hint: str | None = None,
+        post_logout_redirect_uri: str | None = None,
+        state: str | None = None,
+    ) -> str | None:
+        """Build the provider logout URL if end_session_endpoint is available."""
+        if not self.configured:
+            return None
+        try:
+            discovery = await self.discovery()
+            end_session_endpoint = discovery.get("end_session_endpoint")
+            if not end_session_endpoint:
+                return None
+            params: dict[str, str] = {}
+            if id_token_hint:
+                params["id_token_hint"] = id_token_hint
+            if self.client_id:
+                params["client_id"] = self.client_id
+            redirect_uri = (
+                post_logout_redirect_uri
+                or self.post_logout_redirect_uri
+                or self.redirect_uri
+            )
+            if redirect_uri:
+                params["post_logout_redirect_uri"] = redirect_uri
+            if state:
+                params["state"] = state
+            return f"{end_session_endpoint}?{urlencode(params)}" if params else end_session_endpoint
+        except (OIDCError, OSError, httpx.HTTPError):
+            return None
+
     async def exchange_code(self, code: str, nonce: str, verifier: str) -> dict[str, Any]:
         """Exchange an authorization code and validate its returned ID token."""
         discovery = await self.discovery()
@@ -154,7 +186,11 @@ class OIDCClient:
         if not id_token:
             raise OIDCError("OIDC provider did not return an ID token.")
         claims = await self.validate_id_token(id_token, nonce)
-        return {"claims": claims, "access_token": token_response.get("access_token")}
+        return {
+            "claims": claims,
+            "access_token": token_response.get("access_token"),
+            "id_token": id_token,
+        }
 
     async def validate_id_token(self, token: str, nonce: str) -> dict[str, Any]:
         """Validate an ID token's signature, issuer, audience, and nonce."""
