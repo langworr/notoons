@@ -1,0 +1,6 @@
+falcon==4.3.1
+httpx==0.28.1
+pillow==12.3.0
+pymupdf==1.28.2
+PyJWT==2.14.0
+uvicorn==0.52.4
