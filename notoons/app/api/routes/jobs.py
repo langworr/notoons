@@ -44,6 +44,31 @@ def resolve_job_output_dir(base_dir, custom_subdir):
     return target_path, safe_subdir
 
 
+def reserve_output_path(output_dir, filename, job_id):
+    """Reserve the requested filename, adding a job-id suffix on collision."""
+    base_name, extension = os.path.splitext(filename)
+    collision_suffix = ""
+    duplicate_index = 1
+
+    while True:
+        candidate_name = f"{base_name}{collision_suffix}{extension}"
+        candidate_path = os.path.join(output_dir, candidate_name)
+        try:
+            descriptor = os.open(
+                candidate_path,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            )
+        except FileExistsError:
+            collision_suffix = f"_{job_id}"
+            if duplicate_index > 1:
+                collision_suffix += f"_{duplicate_index}"
+            duplicate_index += 1
+            continue
+
+        os.close(descriptor)
+        return candidate_path
+
+
 class JobsResource:
     """List existing conversion jobs and enqueue new PDF conversions.
 
@@ -188,7 +213,7 @@ class JobsResource:
             )
             output_path, custom_subdir = resolve_job_output_dir(output_dir, custom_subdir)
             os.makedirs(output_path, exist_ok=True)
-            cbz_path = os.path.join(output_path, f"{job_id}_{cbz_name}")
+            cbz_path = reserve_output_path(output_path, cbz_name, job_id)
             log_path = os.path.join(CONFIG["logs_dir"], f"{job_id}_{base_name}.log")
 
             job = {

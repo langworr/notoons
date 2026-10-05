@@ -2,7 +2,11 @@
 
 import os
 from notoons.app.config import _parse_output_dirs
-from notoons.app.api.routes.jobs import sanitize_custom_subdir, resolve_job_output_dir
+from notoons.app.api.routes.jobs import (
+    reserve_output_path,
+    sanitize_custom_subdir,
+    resolve_job_output_dir,
+)
 
 
 def test_parse_named_output_directories():
@@ -65,6 +69,17 @@ def test_resolve_job_output_dir():
     # Traversal cannot escape base directory
     target, sub = resolve_job_output_dir(base_dir, "../../../secret")
     assert target.startswith(base_dir)
+
+
+def test_reserve_output_path_uses_suffix_only_on_collision(tmp_path):
+    first_path = reserve_output_path(str(tmp_path), "sample.cbz", "first")
+    assert os.path.basename(first_path) == "sample.cbz"
+
+    second_path = reserve_output_path(str(tmp_path), "sample.cbz", "second")
+    assert os.path.basename(second_path) == "sample_second.cbz"
+
+    third_path = reserve_output_path(str(tmp_path), "sample.cbz", "second")
+    assert os.path.basename(third_path) == "sample_second_2.cbz"
 
 
 def test_upload_job_with_custom_subdir():
