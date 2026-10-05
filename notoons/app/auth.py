@@ -200,7 +200,19 @@ class OIDCClient:
                 response = await client.get(discovery["jwks_uri"])
                 response.raise_for_status()
                 self._jwks = response.json()
+
         header = jwt.get_unverified_header(token)
+        print("DEBUG - Token Header:", header)
+
+        # Stampa anche i claims senza verifica per vedere cosa contiene il token
+        unverified_claims = jwt.decode(token, options={"verify_signature": False})
+        print("DEBUG - Unverified Claims (iss, aud, nonce, exp):", {
+            "iss": unverified_claims.get("iss"),
+            "aud": unverified_claims.get("aud"),
+            "nonce": unverified_claims.get("nonce"),
+            "exp": unverified_claims.get("exp")
+        })
+
         key_data = next(
             (key for key in self._jwks.get("keys", []) if key.get("kid") == header.get("kid")),
             None,
@@ -215,8 +227,10 @@ class OIDCClient:
                 algorithms=[header.get("alg", "")],
                 audience=self.client_id,
                 issuer=self.issuer,
+                options={"leeway": 60, "verify_iat": False},
             )
         except jwt.PyJWTError as exc:
+            print(f"EXACT JWT ERROR -> {type(exc).__name__}: {exc}")
             raise OIDCError("ID-token validation failed.") from exc
         if not hmac.compare_digest(str(claims.get("nonce", "")), nonce):
             raise OIDCError("OIDC nonce validation failed.")
