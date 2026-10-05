@@ -152,7 +152,11 @@ optional fields:
 mode=auto|pages|slides
 dpi=200
 output_dir=Default
+custom_subdir=Comics/Volume 1
 ```
+
+`custom_subdir` is optional. When provided, the directory is created beneath
+the selected configured output directory.
 
 The upload response contains a `job_id`. Poll `GET /jobs/{job_id}` until its
 status is `completed` or `failed`, then use the returned `download_url`.

@@ -8,6 +8,7 @@ archives are served from the configured output directory.
 
 import asyncio
 import os
+import re
 import time
 import traceback
 import uuid
@@ -16,6 +17,31 @@ import falcon.asgi
 
 from ...config import CONFIG
 from ...state import JOBS, JOBS_ORDER, cleanup_jobs, start_job_background
+
+
+def sanitize_custom_subdir(value):
+    """Normalize a user-provided relative output subdirectory."""
+    if not isinstance(value, str) or not value.strip():
+        return ""
+
+    parts = []
+    for part in value.replace("\\", "/").split("/"):
+        if part.strip() in ("", ".", ".."):
+            continue
+        safe_part = re.sub(r'[<>:"|?*\x00-\x1f]', "", part).rstrip(" .")
+        if safe_part and safe_part not in (".", ".."):
+            parts.append(safe_part)
+    return os.path.join(*parts) if parts else ""
+
+
+def resolve_job_output_dir(base_dir, custom_subdir):
+    """Resolve a custom subdirectory without allowing it outside its base."""
+    base_path = os.path.abspath(base_dir)
+    safe_subdir = sanitize_custom_subdir(custom_subdir)
+    target_path = os.path.abspath(os.path.join(base_path, safe_subdir))
+    if os.path.commonpath((base_path, target_path)) != base_path:
+        return base_path, ""
+    return target_path, safe_subdir
 
 
 class JobsResource:
@@ -55,6 +81,8 @@ class JobsResource:
                 "status": j["status"],
                 "mode": j["mode"],
                 "dpi": j["dpi"],
+                "output_dir": j["output_dir"],
+                "custom_subdir": j.get("custom_subdir", ""),
                 "file_size_bytes": j["file_size_bytes"],
                 "total_pages": j["total_pages"],
                 "pages_processed": j.get("pages_processed", j["total_pages"]),
@@ -88,6 +116,8 @@ class JobsResource:
         ``output_dir``
             Optional configured output-directory nickname.  The first
             configured directory is used when omitted.
+        ``custom_subdir``
+            Optional relative subdirectory created beneath the selected output.
 
         A valid upload creates a pending job, writes an initial log entry,
         schedules background conversion, and returns its identifier.  An
@@ -113,6 +143,7 @@ class JobsResource:
             mode = "auto"
             dpi = 200
             output_dir_nickname = CONFIG["outputs_dir"][0]["nickname"]
+            custom_subdir = ""
             bytes_written = 0
 
             async for part in form:
@@ -139,6 +170,8 @@ class JobsResource:
                     value = await part.get_text()
                     if any(item["nickname"] == value for item in CONFIG["outputs_dir"]):
                         output_dir_nickname = value
+                elif part.name == "custom_subdir":
+                    custom_subdir = sanitize_custom_subdir(await part.get_text())
 
             if bytes_written == 0 or not os.path.isfile(temp_pdf_path):
                 if os.path.isfile(temp_pdf_path):
@@ -153,7 +186,9 @@ class JobsResource:
                 item["path"] for item in CONFIG["outputs_dir"]
                 if item["nickname"] == output_dir_nickname
             )
-            cbz_path = os.path.join(output_dir, f"{job_id}_{cbz_name}")
+            output_path, custom_subdir = resolve_job_output_dir(output_dir, custom_subdir)
+            os.makedirs(output_path, exist_ok=True)
+            cbz_path = os.path.join(output_path, f"{job_id}_{cbz_name}")
             log_path = os.path.join(CONFIG["logs_dir"], f"{job_id}_{base_name}.log")
 
             job = {
@@ -161,6 +196,7 @@ class JobsResource:
                 "filename": filename,
                 "cbz_filename": cbz_name,
                 "output_dir": output_dir_nickname,
+                "custom_subdir": custom_subdir,
                 "cbz_path": cbz_path,
                 "log_path": log_path,
                 "temp_pdf_path": temp_pdf_path,
@@ -238,6 +274,7 @@ class JobDetailResource:
             "filename": j["filename"],
             "cbz_filename": j["cbz_filename"],
             "output_dir": j["output_dir"],
+            "custom_subdir": j.get("custom_subdir", ""),
             "status": j["status"],
             "mode": j["mode"],
             "dpi": j["dpi"],
