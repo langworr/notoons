@@ -108,6 +108,7 @@ async function submitUploadJob() {
   const mode = document.getElementById('modeSelect').value;
   const dpi = document.getElementById('dpiSelect').value;
   const outputDir = document.getElementById('outputDirSelect').value;
+  const customSubdir = document.getElementById('customSubdirInput').value;
   const processBtn = document.getElementById('processBtn');
 
   processBtn.disabled = true;
@@ -125,6 +126,7 @@ async function submitUploadJob() {
   formData.append('mode', mode);
   formData.append('dpi', dpi);
   formData.append('output_dir', outputDir);
+  formData.append('custom_subdir', customSubdir);
 
   try {
     const res = await fetch('/jobs', { method: 'POST', body: formData });
