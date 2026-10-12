@@ -1,0 +1,12 @@
+.git
+.vscode
+__pycache__
+*.py[cod]
+.pytest_cache
+.venv
+env
+outputs
+logs
+temp
+notoons/config
+test_*.py

@@ -29,23 +29,16 @@ dependencies:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r env/prod.txt
+python -m pip install -r requirements_prod.txt
 python -m pip install pytest
-```
-
-The checked-in development environment already contains these packages. If
-you use it directly on Windows, activate it with:
-
-```powershell
-.\env\dev\Scripts\Activate.ps1
 ```
 
 ## Configuration
 
-The packaged application reads `notoons/config/config.txt`. It falls back to
-the repository `config.txt` when the packaged file is unavailable. Relative
-paths are resolved from the application directory and required directories
-are created at startup.
+The application reads `notoons/config/config.txt`. It falls back to `config.txt`
+in the application or repository directory when the packaged file is
+unavailable. Relative paths are resolved from the application directory and
+required directories are created at startup.
 
 Copy the example values in the configuration file and replace all placeholder
 OIDC values before starting the app:
@@ -109,6 +102,30 @@ Open <http://127.0.0.1:8000/> in a browser. Unauthenticated requests are sent
 to the configured OIDC provider. The server listens on localhost by default;
 configure a reverse proxy and HTTPS before exposing it outside the local
 machine.
+
+## Production container
+
+The Docker setup builds only the production dependencies from
+`requirements_prod.txt`. The config directory is a read-only bind mount and
+generated archives and logs are stored in the read-write `./outputs` and
+`./logs` bind mounts. Temporary uploads stay inside the container.
+
+1. Configure `notoons/config/config.txt` with the production OIDC provider
+   values. Set `oidc_cookie_secure = true` when accessing the app over HTTPS.
+2. Start the container from the repository root:
+
+   ```powershell
+   docker compose up --build -d
+   ```
+
+3. Open <http://localhost:8000/>. Set `NOTOONS_PORT` in the environment to
+   publish a different host port.
+
+The container runs as UID/GID `10001:10001` by default; ensure the host
+`outputs` directory is writable by that user. On Linux, create `outputs` and
+set `NOTOONS_UID` and `NOTOONS_GID` to your account's IDs before starting
+Compose so the bind mount is writable. The config mount is read-only by
+design; edit the host config file and recreate the container to apply changes.
 
 ## Conversion workflow
 

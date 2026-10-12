@@ -1,0 +1,26 @@
+services:
+  notoons:
+    build:
+      context: .
+    image: notoons:prod
+    user: "${NOTOONS_UID:-10001}:${NOTOONS_GID:-10001}"
+    ports:
+      - "${NOTOONS_PORT:-8000}:8000"
+    environment:
+      NOTOONS_OUTPUTS_DIR: '[{"nickname":"Default","path":"/data/outputs"}]'
+      NOTOONS_LOGS_DIR: /data/logs
+      NOTOONS_TEMP_DIR: /tmp/notoons/temp
+    volumes:
+      - type: bind
+        source: ./config
+        target: /app/notoons/config
+        read_only: true
+      - type: bind
+        source: ./outputs
+        target: /data/outputs
+      - type: bind
+        source: ./logs
+        target: /data/logs
+      - type: bind
+        source: ./temp
+        target: /tmp/notoons/temp
