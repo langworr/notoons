@@ -9,7 +9,10 @@ when this module is imported.
 """
 
 import json
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 """Absolute path to the directory containing the application configuration."""
@@ -51,7 +54,8 @@ def load_config() -> dict:
 
     The supported configuration keys are ``outputs_dir`` (a JSON array of
     ``{"nickname": "...", "path": "..."}`` objects), ``logs_dir``,
-    ``temp_dir``, ``oidc_issuer_url``, ``oidc_client_id``,
+    ``temp_dir``, ``server_log_file``, ``server_log_level``,
+    ``oidc_issuer_url``, ``oidc_client_id``,
     ``oidc_client_secret``, ``oidc_redirect_uri``, ``oidc_session_secret``,
     ``oidc_scopes``, and ``oidc_cookie_secure``.  Each key may be written as
     either ``key=value`` or ``key:value``.  Blank lines and lines beginning
@@ -67,13 +71,12 @@ def load_config() -> dict:
          preferred for all settings; legacy short names remain supported for
          the directory settings.
 
-    Relative paths are resolved against :data:`BASE_DIR`.  All three
-    directories are created with :func:`os.makedirs` before the mapping is
-    returned.
+    Relative paths are resolved against :data:`BASE_DIR`.      Configured directories and the parent directory for the server log file
+    are created with :func:`os.makedirs` before the mapping is returned.
 
     Returns:
-        A mapping containing absolute paths under the keys ``outputs_dir``,
-        ``logs_dir``, and ``temp_dir``.
+        A mapping containing normalized output, log, and temporary paths and
+        the configured server log file and level.
 
     Raises:
         OSError: If a configured directory cannot be created.  Errors while
@@ -84,6 +87,8 @@ def load_config() -> dict:
         "outputs_dir": [{"nickname": "Default", "path": "outputs"}],
         "logs_dir": "logs",
         "temp_dir": "temp",
+        "server_log_file": "server.log",
+        "server_log_level": "INFO",
         "oidc_issuer_url": "",
         "oidc_client_id": "",
         "oidc_client_secret": "",
@@ -118,18 +123,29 @@ def load_config() -> dict:
                         try:
                             cfg[k] = _parse_output_dirs(v) if k == "outputs_dir" else v
                         except ValueError as exc:
-                            print(f"[WARN] Invalid outputs_dir configuration: {exc}")
+                            logger.warning("Invalid outputs_dir configuration: %s", exc)
         except (OSError, UnicodeError, ValueError) as e:
-            print(f"[WARN] Impossibile leggere config.txt: {e}")
+            logger.warning("Unable to read config.txt: %s", e)
 
     outputs_override = os.getenv("NOTOONS_OUTPUTS_DIR", os.getenv("OUTPUTS_DIR"))
     if outputs_override is not None:
         try:
             cfg["outputs_dir"] = _parse_output_dirs(outputs_override)
         except ValueError as exc:
-            print(f"[WARN] Invalid outputs directory override: {exc}")
+            logger.warning("Invalid outputs directory override: %s", exc)
     cfg["logs_dir"] = os.getenv("NOTOONS_LOGS_DIR", os.getenv("LOGS_DIR", cfg["logs_dir"]))
     cfg["temp_dir"] = os.getenv("NOTOONS_TEMP_DIR", os.getenv("TEMP_DIR", cfg["temp_dir"]))
+    cfg["server_log_file"] = os.getenv(
+        "NOTOONS_SERVER_LOG_FILE", cfg["server_log_file"]
+    ).strip()
+    cfg["server_log_level"] = os.getenv("NOTOONS_SERVER_LOG_LEVEL", cfg["server_log_level"])
+    level_name = str(cfg["server_log_level"]).strip().upper()
+    level = logging.getLevelNamesMapping().get(level_name)
+    if not isinstance(level, int):
+        raise ValueError(f"Invalid server_log_level: {cfg['server_log_level']}")
+    cfg["server_log_level"] = logging.getLevelName(level)
+    if not str(cfg["server_log_file"]).strip():
+        raise ValueError("server_log_file must not be empty")
     for key in (
         "oidc_issuer_url",
         "oidc_client_id",
@@ -152,6 +168,11 @@ def load_config() -> dict:
         if not os.path.isabs(cfg[k]):
             cfg[k] = os.path.abspath(os.path.join(BASE_DIR, cfg[k]))
         os.makedirs(cfg[k], exist_ok=True)
+
+    if not os.path.isabs(cfg["server_log_file"]):
+        cfg["server_log_file"] = os.path.join(cfg["logs_dir"], cfg["server_log_file"])
+    cfg["server_log_file"] = os.path.abspath(cfg["server_log_file"])
+    os.makedirs(os.path.dirname(cfg["server_log_file"]), exist_ok=True)
 
     return cfg
 

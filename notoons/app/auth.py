@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import hmac
+import logging
 import json
 import secrets
 import time
@@ -13,6 +14,8 @@ import httpx
 import jwt
 
 from .config import CONFIG
+
+logger = logging.getLogger(__name__)
 
 
 class OIDCError(Exception):
@@ -202,14 +205,12 @@ class OIDCClient:
                 self._jwks = response.json()
 
         header = jwt.get_unverified_header(token)
-        print("DEBUG - Token Header:", header)
+        logger.debug("ID-token header: %s", header)
 
-        # Stampa anche i claims senza verifica per vedere cosa contiene il token
         unverified_claims = jwt.decode(token, options={"verify_signature": False})
-        print("DEBUG - Unverified Claims (iss, aud, nonce, exp):", {
+        logger.debug("Unverified ID-token claims: %s", {
             "iss": unverified_claims.get("iss"),
             "aud": unverified_claims.get("aud"),
-            "nonce": unverified_claims.get("nonce"),
             "exp": unverified_claims.get("exp")
         })
 
@@ -230,7 +231,7 @@ class OIDCClient:
                 options={"leeway": 60, "verify_iat": False},
             )
         except jwt.PyJWTError as exc:
-            print(f"EXACT JWT ERROR -> {type(exc).__name__}: {exc}")
+            logger.warning("ID-token validation failed: %s", exc)
             raise OIDCError("ID-token validation failed.") from exc
         if not hmac.compare_digest(str(claims.get("nonce", "")), nonce):
             raise OIDCError("OIDC nonce validation failed.")

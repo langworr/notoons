@@ -1,6 +1,8 @@
 """Tests for named output-directory configuration and custom subdirectories."""
 
+import logging
 import os
+import pytest
 from notoons.app.config import _parse_output_dirs
 from notoons.app.api.routes.jobs import (
     reserve_output_path,
@@ -25,6 +27,76 @@ def test_parse_legacy_single_output_directory():
     assert _parse_output_dirs("outputs") == [
         {"nickname": "outputs", "path": "outputs"}
     ]
+
+
+def test_server_logging_configuration(tmp_path, monkeypatch):
+    from notoons.app import config as app_config
+    from notoons.app.server_logging import configure_server_logging
+
+    monkeypatch.setattr(app_config, "BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("NOTOONS_SERVER_LOG_LEVEL", "debug")
+    monkeypatch.setenv("NOTOONS_SERVER_LOG_FILE", "custom/server-output.log")
+    for name in (
+        "NOTOONS_OUTPUTS_DIR", "OUTPUTS_DIR", "NOTOONS_LOGS_DIR", "LOGS_DIR",
+        "NOTOONS_TEMP_DIR", "TEMP_DIR",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    config_file = tmp_path / "config" / "config.txt"
+    config_file.parent.mkdir()
+    config_file.write_text("logs_dir = service-logs\ntemp_dir = service-temp\n", encoding="utf-8")
+
+    config = app_config.load_config()
+    assert config["server_log_level"] == "DEBUG"
+    assert config["server_log_file"] == str(tmp_path / "service-logs" / "custom" / "server-output.log")
+
+    loggers = [
+        logging.getLogger(),
+        logging.getLogger("uvicorn.error"),
+        logging.getLogger("uvicorn.access"),
+    ]
+    original_levels = [logger.level for logger in loggers]
+    original_handlers = [list(logger.handlers) for logger in loggers]
+    original_propagation = [logger.propagate for logger in loggers]
+    try:
+        logging.getLogger("uvicorn.error").propagate = False
+        configure_server_logging(config)
+        test_logger = logging.getLogger("notoons.test_server_logging")
+        test_logger.debug("configured server log entry")
+        logging.getLogger("uvicorn.error").debug("configured Uvicorn log entry")
+        for handler in logging.getLogger().handlers:
+            if getattr(handler, "_notoons_server_log", False):
+                handler.flush()
+        for handler in logging.getLogger("uvicorn.error").handlers:
+            if getattr(handler, "_notoons_server_log", False):
+                handler.flush()
+
+        log_contents = (
+            tmp_path / "service-logs" / "custom" / "server-output.log"
+        ).read_text(encoding="utf-8")
+        assert "DEBUG [notoons.test_server_logging] configured server log entry" in log_contents
+        assert "DEBUG [uvicorn.error] configured Uvicorn log entry" in log_contents
+    finally:
+        for logger, level, handlers, propagate in zip(
+            loggers, original_levels, original_handlers, original_propagation
+        ):
+            for handler in logger.handlers[:]:
+                if handler not in handlers:
+                    logger.removeHandler(handler)
+                    handler.close()
+            logger.setLevel(level)
+            logger.propagate = propagate
+
+
+def test_invalid_server_log_level_fails(tmp_path, monkeypatch):
+    from notoons.app import config as app_config
+
+    monkeypatch.setattr(app_config, "BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("NOTOONS_SERVER_LOG_LEVEL", "verbose")
+    for name in ("NOTOONS_OUTPUTS_DIR", "OUTPUTS_DIR", "NOTOONS_LOGS_DIR", "LOGS_DIR",
+                 "NOTOONS_TEMP_DIR", "TEMP_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(ValueError, match="Invalid server_log_level"):
+        app_config.load_config()
 
 
 def test_sanitize_custom_subdir():
@@ -175,4 +247,3 @@ if __name__ == "__main__":
     test_resolve_job_output_dir()
     test_upload_job_with_custom_subdir()
     print("ALL OUTPUT DIR & SUBFOLDER TESTS PASSED!")
-

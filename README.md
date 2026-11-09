@@ -54,6 +54,8 @@ OIDC values before starting the app:
 outputs_dir = [{"nickname": "Default", "path": "outputs"}, {"nickname": "Archive", "path": "outputs/archive"}]
 logs_dir = logs
 temp_dir = temp
+server_log_file = server.log
+server_log_level = INFO
 
 oidc_issuer_url = https://identity.example.com/realms/notoons
 oidc_client_id = notoons
@@ -73,6 +75,11 @@ served over HTTPS.
 `nickname` and a relative or absolute `path`. A legacy single path such as
 `outputs_dir = outputs` is also accepted.
 
+`server_log_file` configures the server log file name. Relative paths are
+placed inside `logs_dir`; absolute paths are also accepted.
+`server_log_level` accepts `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`.
+Uvicorn's console output remains enabled.
+
 Environment variables override file values. The preferred names are:
 
 | Setting | Environment variable |
@@ -80,6 +87,8 @@ Environment variables override file values. The preferred names are:
 | `outputs_dir` | `NOTOONS_OUTPUTS_DIR` |
 | `logs_dir` | `NOTOONS_LOGS_DIR` |
 | `temp_dir` | `NOTOONS_TEMP_DIR` |
+| `server_log_file` | `NOTOONS_SERVER_LOG_FILE` |
+| `server_log_level` | `NOTOONS_SERVER_LOG_LEVEL` |
 | `oidc_issuer_url` | `NOTOONS_OIDC_ISSUER_URL` |
 | `oidc_client_id` | `NOTOONS_OIDC_CLIENT_ID` |
 | `oidc_client_secret` | `NOTOONS_OIDC_CLIENT_SECRET` |
