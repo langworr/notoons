@@ -2,6 +2,7 @@
 
 import logging
 import os
+from datetime import date, timedelta
 import pytest
 from notoons.app.config import _parse_output_dirs
 from notoons.app.api.routes.jobs import (
@@ -31,7 +32,7 @@ def test_parse_legacy_single_output_directory():
 
 def test_server_logging_configuration(tmp_path, monkeypatch):
     from notoons.app import config as app_config
-    from notoons.app.server_logging import configure_server_logging
+    from notoons.app import server_logging
 
     monkeypatch.setattr(app_config, "BASE_DIR", str(tmp_path))
     monkeypatch.setenv("NOTOONS_SERVER_LOG_LEVEL", "debug")
@@ -59,7 +60,7 @@ def test_server_logging_configuration(tmp_path, monkeypatch):
     original_propagation = [logger.propagate for logger in loggers]
     try:
         logging.getLogger("uvicorn.error").propagate = False
-        configure_server_logging(config)
+        server_logging.configure_server_logging(config)
         test_logger = logging.getLogger("notoons.test_server_logging")
         test_logger.debug("configured server log entry")
         logging.getLogger("uvicorn.error").debug("configured Uvicorn log entry")
@@ -70,11 +71,24 @@ def test_server_logging_configuration(tmp_path, monkeypatch):
             if getattr(handler, "_notoons_server_log", False):
                 handler.flush()
 
-        log_contents = (
-            tmp_path / "service-logs" / "custom" / "server-output.log"
-        ).read_text(encoding="utf-8")
+        log_path = tmp_path / "service-logs" / "custom" / f"server-output_{date.today().isoformat()}.log"
+        log_contents = log_path.read_text(encoding="utf-8")
         assert "DEBUG [notoons.test_server_logging] configured server log entry" in log_contents
         assert "DEBUG [uvicorn.error] configured Uvicorn log entry" in log_contents
+
+        next_day = date.today() + timedelta(days=1)
+
+        class NextDay:
+            @staticmethod
+            def today():
+                return next_day
+
+        monkeypatch.setattr(server_logging, "date", NextDay)
+        test_logger.debug("next day log entry")
+        assert "next day log entry" in (
+            tmp_path / "service-logs" / "custom" / f"server-output_{next_day.isoformat()}.log"
+        ).read_text(encoding="utf-8")
+        assert "next day log entry" not in log_path.read_text(encoding="utf-8")
     finally:
         for logger, level, handlers, propagate in zip(
             loggers, original_levels, original_handlers, original_propagation

@@ -75,8 +75,9 @@ served over HTTPS.
 `nickname` and a relative or absolute `path`. A legacy single path such as
 `outputs_dir = outputs` is also accepted.
 
-`server_log_file` configures the server log file name. Relative paths are
-placed inside `logs_dir`; absolute paths are also accepted.
+`server_log_file` configures the base name for daily server logs. The date is
+inserted before the extension (for example, `server_2026-11-09.log`).
+Relative paths are placed inside `logs_dir`; absolute paths are also accepted.
 `server_log_level` accepts `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`.
 Uvicorn's console output remains enabled.
 
