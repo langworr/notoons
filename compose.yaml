@@ -12,11 +12,11 @@ services:
       NOTOONS_TEMP_DIR: /tmp/notoons/temp
     volumes:
       - type: bind
-        source: ./config
+        source: ./notoons/config
         target: /app/notoons/config
         read_only: true
-      - type: bind
-        source: ./outputs
+      - type: volume
+        source: outputs
         target: /data/outputs
       - type: bind
         source: ./logs
@@ -24,3 +24,7 @@ services:
       - type: bind
         source: ./temp
         target: /tmp/notoons/temp
+
+volumes:
+  outputs:
+    name: ${NOTOONS_OUTPUTS_VOLUME:-notoons-outputs}

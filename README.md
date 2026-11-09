@@ -116,9 +116,11 @@ machine.
 ## Production container
 
 The Docker setup builds only the production dependencies from
-`requirements_prod.txt`. The config directory is a read-only bind mount and
-generated archives and logs are stored in the read-write `./outputs` and
-`./logs` bind mounts. Temporary uploads stay inside the container.
+`requirements_prod.txt`. The config directory is a read-only bind mount;
+generated archives are stored in the `notoons-outputs` named volume, and logs
+are stored in the read-write `./logs` bind mount. Temporary uploads stay
+inside the container. The image declares config, log, and output volumes, and
+creates the writable directories for its non-root runtime user.
 
 1. Configure `notoons/config/config.txt` with the production OIDC provider
    values. Set `oidc_cookie_secure = true` when accessing the app over HTTPS.
@@ -132,10 +134,37 @@ generated archives and logs are stored in the read-write `./outputs` and
    publish a different host port.
 
 The container runs as UID/GID `10001:10001` by default; ensure the host
-`outputs` directory is writable by that user. On Linux, create `outputs` and
-set `NOTOONS_UID` and `NOTOONS_GID` to your account's IDs before starting
-Compose so the bind mount is writable. The config mount is read-only by
-design; edit the host config file and recreate the container to apply changes.
+logs directory is writable by that user. The output named volume is
+initialized with permissions for the container user. Set
+`NOTOONS_OUTPUTS_VOLUME` to choose a different Docker volume name. Other
+containers in this Compose project can share output files by mounting the
+same volume, preferably read-only (the `outputs` volume is already declared
+in the project's `compose.yaml`):
+
+```yaml
+services:
+  consumer:
+    image: your-consumer-image
+    volumes:
+      - outputs:/data/outputs:ro
+```
+
+For a different Compose project, declare the volume as external and use the
+same name:
+
+```yaml
+volumes:
+  outputs:
+    name: ${NOTOONS_OUTPUTS_VOLUME:-notoons-outputs}
+    external: true
+```
+
+Alternatively, a host directory can be used as the output volume by changing
+the `outputs` mount in `compose.yaml` to a bind mount. For bind mounts, ensure
+the host output and logs directories are writable by UID/GID `10001:10001`,
+or set `NOTOONS_UID` and `NOTOONS_GID` to suitable IDs. The config mount is
+read-only by design; edit `notoons/config/config.txt` and recreate the
+container to apply changes.
 
 ## Conversion workflow
 
