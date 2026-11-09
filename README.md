@@ -47,6 +47,8 @@ OIDC values before starting the app:
 outputs_dir = [{"nickname": "Default", "path": "outputs"}, {"nickname": "Archive", "path": "outputs/archive"}]
 logs_dir = logs
 temp_dir = temp
+server_log_file = server.log
+server_log_level = INFO
 
 oidc_issuer_url = https://identity.example.com/realms/notoons
 oidc_client_id = notoons
@@ -66,6 +68,12 @@ served over HTTPS.
 `nickname` and a relative or absolute `path`. A legacy single path such as
 `outputs_dir = outputs` is also accepted.
 
+`server_log_file` configures the base name for daily server logs. The date is
+inserted before the extension (for example, `server_2026-11-09.log`).
+Relative paths are placed inside `logs_dir`; absolute paths are also accepted.
+`server_log_level` accepts `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`.
+Uvicorn's console output remains enabled.
+
 Environment variables override file values. The preferred names are:
 
 | Setting | Environment variable |
@@ -73,6 +81,8 @@ Environment variables override file values. The preferred names are:
 | `outputs_dir` | `NOTOONS_OUTPUTS_DIR` |
 | `logs_dir` | `NOTOONS_LOGS_DIR` |
 | `temp_dir` | `NOTOONS_TEMP_DIR` |
+| `server_log_file` | `NOTOONS_SERVER_LOG_FILE` |
+| `server_log_level` | `NOTOONS_SERVER_LOG_LEVEL` |
 | `oidc_issuer_url` | `NOTOONS_OIDC_ISSUER_URL` |
 | `oidc_client_id` | `NOTOONS_OIDC_CLIENT_ID` |
 | `oidc_client_secret` | `NOTOONS_OIDC_CLIENT_SECRET` |
@@ -130,10 +140,11 @@ design; edit the host config file and recreate the container to apply changes.
 ## Conversion workflow
 
 1. Sign in through the OIDC provider.
-2. Select or drag a PDF into the upload area.
+2. Select or drag one or more PDFs into the upload area.
 3. Choose an extraction mode, DPI, and output directory.
-4. Monitor the asynchronous job until it completes.
-5. Download the generated CBZ archive.
+4. Queue the files; each PDF is added as an individual conversion job.
+5. Monitor the asynchronous jobs until they complete.
+6. Download the generated CBZ archives.
 
 The supported extraction modes are:
 
@@ -162,8 +173,9 @@ All application endpoints require authentication unless stated otherwise.
 | `GET` | `/auth/callback` | Handle the OIDC callback |
 | `GET` | `/auth/logout` | Clear the local session |
 
-`POST /jobs` expects a multipart form with a required `file` field and these
-optional fields:
+`POST /jobs` expects a multipart form with one required `file` field per
+request and these optional fields. When multiple PDFs are selected in the web
+interface, it sends one request and creates one job for each file.
 
 ```text
 mode=auto|pages|slides

@@ -2,7 +2,8 @@
 // NOTOONS - Client-Side JavaScript
 // ==========================================
 
-let selectedFile = null;
+let selectedFiles = [];
+let isUploading = false;
 let pollInterval = null;
 let activeModalJobId = null;
 let cachedModalLogs = [];
@@ -37,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }));
     dropzone.addEventListener('drop', e => {
       e.preventDefault();
-      if (e.dataTransfer.files.length) handleFileSelected(e.dataTransfer.files[0]);
+      if (e.dataTransfer.files.length) handleFileSelected(e.dataTransfer.files);
     });
 
     // Initial load
@@ -47,28 +48,48 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-function handleFileSelected(file) {
-  if (!file) return;
-  selectedFile = file;
-  const sizeStr = file.size > 1024 * 1024
-    ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
-    : `${(file.size / 1024).toFixed(1)} KB`;
-
-  document.getElementById('dropzoneTitle').textContent = "File selected (click to change)";
-  document.getElementById('dropzoneDesc').textContent = "";
-  document.getElementById('filePillText').textContent = `${file.name} (${sizeStr})`;
-  document.getElementById('filePill').style.display = "inline-flex";
-
-  document.getElementById('processBtn').disabled = false;
+function handleFileSelected(files) {
+  if (isUploading || !files || !files.length) return;
+  selectedFiles = Array.from(files);
+  document.getElementById('fileInput').value = '';
+  updateSelectedFiles();
 }
 
-function resetDropzone() {
-  selectedFile = null;
-  document.getElementById('fileInput').value = '';
-  document.getElementById('dropzoneTitle').textContent = "Click to select or drag & drop PDF";
-  document.getElementById('dropzoneDesc').textContent = "Supports large multi-page PDFs, handouts, and slides";
-  document.getElementById('filePill').style.display = "none";
-  document.getElementById('processBtn').disabled = true;
+function updateSelectedFiles() {
+  const dropzoneTitle = document.getElementById('dropzoneTitle');
+  const dropzoneDesc = document.getElementById('dropzoneDesc');
+  const filePill = document.getElementById('filePill');
+  const filePillText = document.getElementById('filePillText');
+  const processBtn = document.getElementById('processBtn');
+  const queueLabel = selectedFiles.length
+    ? `Queue ${selectedFiles.length} Conversion Job${selectedFiles.length === 1 ? '' : 's'}`
+    : 'Queue Conversion Jobs';
+
+  if (selectedFiles.length) {
+    dropzoneTitle.textContent = `${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'} selected (click to change)`;
+    dropzoneDesc.textContent = '';
+    filePillText.textContent = selectedFiles.map(file => file.name).join(', ');
+    filePill.style.display = 'inline-flex';
+  } else {
+    dropzoneTitle.textContent = 'Click to select or drag & drop PDFs';
+    dropzoneDesc.textContent = 'Select or drop multiple PDFs to queue them individually';
+    filePill.style.display = 'none';
+  }
+
+  processBtn.disabled = isUploading || selectedFiles.length === 0;
+  processBtn.innerHTML = isUploading ? `
+    <svg style="width: 20px; height: 20px; animation: spin 1s linear infinite;"
+      fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity: 0.25;"></circle>
+      <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style="opacity: 0.75;"></path>
+    </svg>
+    <span>Uploading ${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'}...</span>
+  ` : `
+    <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+    </svg>
+    ${queueLabel}
+  `;
 }
 
 async function loadConfig() {
@@ -102,52 +123,54 @@ async function loadConfig() {
 }
 
 async function submitUploadJob() {
-  if (!selectedFile) return;
+  if (!selectedFiles.length || isUploading) return;
 
-  const fileToUpload = selectedFile;
+  const filesToUpload = [...selectedFiles];
   const mode = document.getElementById('modeSelect').value;
   const dpi = document.getElementById('dpiSelect').value;
   const outputDir = document.getElementById('outputDirSelect').value;
   const customSubdir = document.getElementById('customSubdirInput').value;
-  const processBtn = document.getElementById('processBtn');
+  isUploading = true;
+  updateSelectedFiles();
 
-  processBtn.disabled = true;
-  processBtn.innerHTML = `
-    <svg style="width: 20px; height: 20px; animation: spin 1s linear infinite;"
-      fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity: 0.25;"></circle>
-      <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style="opacity: 0.75;"></path>
-    </svg>
-    <span>Uploading...</span>
-  `;
-
-  const formData = new FormData();
-  formData.append('file', fileToUpload);
-  formData.append('mode', mode);
-  formData.append('dpi', dpi);
-  formData.append('output_dir', outputDir);
-  formData.append('custom_subdir', customSubdir);
-
+  const failedFiles = [];
+  const errors = [];
+  let queuedCount = 0;
   try {
-    const res = await fetch('/jobs', { method: 'POST', body: formData });
-    const data = await res.json();
-    if (res.ok && data.status === 'ok') {
-      resetDropzone();
+    for (const file of filesToUpload) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('mode', mode);
+      formData.append('dpi', dpi);
+      formData.append('output_dir', outputDir);
+      formData.append('custom_subdir', customSubdir);
+
+      try {
+        const res = await fetch('/jobs', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          queuedCount++;
+        } else {
+          failedFiles.push(file);
+          errors.push(`${file.name}: ${data.error || `Request failed (${res.status})`}`);
+        }
+      } catch (err) {
+        failedFiles.push(file);
+        errors.push(`${file.name}: ${err.message}`);
+      }
+    }
+
+    selectedFiles = failedFiles;
+    if (queuedCount) {
       await fetchJobs();
       startPolling();
-    } else {
-      alert('Failed to enqueue job: ' + (data.error || 'Unknown error'));
     }
-  } catch (err) {
-    alert('Upload failed: ' + err.message);
+    if (errors.length) {
+      alert(`Could not enqueue ${errors.length} file${errors.length === 1 ? '' : 's'}:\n${errors.join('\n')}`);
+    }
   } finally {
-    processBtn.disabled = selectedFile === null;
-    processBtn.innerHTML = `
-      <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-      </svg>
-      Queue Conversion Job
-    `;
+    isUploading = false;
+    updateSelectedFiles();
   }
 }
 
