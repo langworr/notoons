@@ -10,7 +10,11 @@ import os
 import falcon.asgi
 from falcon.media.multipart import MultipartFormHandler
 
-from .config import BASE_DIR
+from .config import BASE_DIR, CONFIG
+from .server_logging import configure_server_logging
+
+configure_server_logging(CONFIG)
+
 from .auth import OIDCClient
 from .middleware import AuthenticationMiddleware
 from .state import cleanup_temp_dir

@@ -44,7 +44,7 @@ class HomeResource:
 
 
 class ConfigResource:
-    """Expose the active runtime directory configuration through HTTP."""
+    """Expose active runtime paths and server logging settings through HTTP."""
 
     async def on_get(self, _req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
         """Return the configured output, log, and temporary directories.
@@ -66,4 +66,6 @@ class ConfigResource:
             "outputs_dir": CONFIG["outputs_dir"],
             "logs_dir": CONFIG["logs_dir"],
             "temp_dir": CONFIG["temp_dir"],
+            "server_log_file": CONFIG["server_log_file"],
+            "server_log_level": CONFIG["server_log_level"],
         }
