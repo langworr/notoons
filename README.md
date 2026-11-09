@@ -113,10 +113,11 @@ machine.
 ## Conversion workflow
 
 1. Sign in through the OIDC provider.
-2. Select or drag a PDF into the upload area.
+2. Select or drag one or more PDFs into the upload area.
 3. Choose an extraction mode, DPI, and output directory.
-4. Monitor the asynchronous job until it completes.
-5. Download the generated CBZ archive.
+4. Queue the files; each PDF is added as an individual conversion job.
+5. Monitor the asynchronous jobs until they complete.
+6. Download the generated CBZ archives.
 
 The supported extraction modes are:
 
@@ -145,8 +146,9 @@ All application endpoints require authentication unless stated otherwise.
 | `GET` | `/auth/callback` | Handle the OIDC callback |
 | `GET` | `/auth/logout` | Clear the local session |
 
-`POST /jobs` expects a multipart form with a required `file` field and these
-optional fields:
+`POST /jobs` expects a multipart form with one required `file` field per
+request and these optional fields. When multiple PDFs are selected in the web
+interface, it sends one request and creates one job for each file.
 
 ```text
 mode=auto|pages|slides
