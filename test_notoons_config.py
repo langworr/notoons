@@ -35,16 +35,15 @@ def test_server_logging_configuration(tmp_path, monkeypatch):
     from notoons.app import server_logging
 
     monkeypatch.setattr(app_config, "BASE_DIR", str(tmp_path))
-    monkeypatch.setenv("NOTOONS_SERVER_LOG_LEVEL", "debug")
-    monkeypatch.setenv("NOTOONS_SERVER_LOG_FILE", "custom/server-output.log")
-    for name in (
-        "NOTOONS_OUTPUTS_DIR", "OUTPUTS_DIR", "NOTOONS_LOGS_DIR", "LOGS_DIR",
-        "NOTOONS_TEMP_DIR", "TEMP_DIR",
-    ):
-        monkeypatch.delenv(name, raising=False)
     config_file = tmp_path / "config" / "config.txt"
     config_file.parent.mkdir()
-    config_file.write_text("logs_dir = service-logs\ntemp_dir = service-temp\n", encoding="utf-8")
+    config_file.write_text(
+        "logs_dir = service-logs\n"
+        "temp_dir = service-temp\n"
+        "server_log_level = debug\n"
+        "server_log_file = custom/server-output.log\n",
+        encoding="utf-8",
+    )
 
     config = app_config.load_config()
     assert config["server_log_level"] == "DEBUG"
@@ -105,12 +104,74 @@ def test_invalid_server_log_level_fails(tmp_path, monkeypatch):
     from notoons.app import config as app_config
 
     monkeypatch.setattr(app_config, "BASE_DIR", str(tmp_path))
-    monkeypatch.setenv("NOTOONS_SERVER_LOG_LEVEL", "verbose")
-    for name in ("NOTOONS_OUTPUTS_DIR", "OUTPUTS_DIR", "NOTOONS_LOGS_DIR", "LOGS_DIR",
-                 "NOTOONS_TEMP_DIR", "TEMP_DIR"):
-        monkeypatch.delenv(name, raising=False)
+    config_file = tmp_path / "config" / "config.txt"
+    config_file.parent.mkdir()
+    config_file.write_text("server_log_level = verbose\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Invalid server_log_level"):
         app_config.load_config()
+
+
+def test_environment_variables_do_not_override_config(tmp_path, monkeypatch):
+    from notoons.app import config as app_config
+
+    monkeypatch.setattr(app_config, "BASE_DIR", str(tmp_path))
+    config_file = tmp_path / "config" / "config.txt"
+    config_file.parent.mkdir()
+    config_file.write_text(
+        'outputs_dir = [{"nickname": "Configured", "path": "configured-output"}]\n'
+        "logs_dir = configured-logs\n"
+        "temp_dir = configured-temp\n"
+        "server_log_file = configured.log\n"
+        "server_log_level = WARNING\n"
+        "oidc_issuer_url = https://configured.example\n"
+        "oidc_client_id = configured-client\n"
+        "oidc_client_secret = configured-secret\n"
+        "oidc_redirect_uri = https://configured.example/callback\n"
+        "oidc_post_logout_redirect_uri = https://configured.example/logout\n"
+        "oidc_session_secret = configured-session-secret\n"
+        "oidc_scopes = openid email\n"
+        "oidc_cookie_secure = true\n",
+        encoding="utf-8",
+    )
+
+    for name, value in {
+        "NOTOONS_OUTPUTS_DIR": "environment-output",
+        "OUTPUTS_DIR": "legacy-output",
+        "NOTOONS_LOGS_DIR": "environment-logs",
+        "LOGS_DIR": "legacy-logs",
+        "NOTOONS_TEMP_DIR": "environment-temp",
+        "TEMP_DIR": "legacy-temp",
+        "NOTOONS_SERVER_LOG_FILE": "environment.log",
+        "NOTOONS_SERVER_LOG_LEVEL": "verbose",
+        "NOTOONS_OIDC_ISSUER_URL": "https://environment.example",
+        "NOTOONS_OIDC_CLIENT_ID": "environment-client",
+        "NOTOONS_OIDC_CLIENT_SECRET": "environment-secret",
+        "NOTOONS_OIDC_REDIRECT_URI": "https://environment.example/callback",
+        "NOTOONS_OIDC_POST_LOGOUT_REDIRECT_URI": "https://environment.example/logout",
+        "NOTOONS_OIDC_SESSION_SECRET": "environment-session-secret",
+        "NOTOONS_OIDC_SCOPES": "environment",
+        "NOTOONS_OIDC_COOKIE_SECURE": "false",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    config = app_config.load_config()
+
+    assert config["outputs_dir"] == [{
+        "nickname": "Configured",
+        "path": str(tmp_path / "configured-output"),
+    }]
+    assert config["logs_dir"] == str(tmp_path / "configured-logs")
+    assert config["temp_dir"] == str(tmp_path / "configured-temp")
+    assert config["server_log_file"] == str(tmp_path / "configured-logs" / "configured.log")
+    assert config["server_log_level"] == "WARNING"
+    assert config["oidc_issuer_url"] == "https://configured.example"
+    assert config["oidc_client_id"] == "configured-client"
+    assert config["oidc_client_secret"] == "configured-secret"
+    assert config["oidc_redirect_uri"] == "https://configured.example/callback"
+    assert config["oidc_post_logout_redirect_uri"] == "https://configured.example/logout"
+    assert config["oidc_session_secret"] == "configured-session-secret"
+    assert config["oidc_scopes"] == "openid email"
+    assert config["oidc_cookie_secure"] == "true"
 
 
 def test_sanitize_custom_subdir():
