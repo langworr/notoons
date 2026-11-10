@@ -26,9 +26,8 @@ class OIDCClient:
     """Small provider-agnostic OpenID Connect authorization-code client.
 
     Provider settings are read from :data:`notoons.app.config.CONFIG`, which
-    loads ``config.txt`` and applies environment-variable overrides.  The
-    client uses discovery, PKCE, nonce validation, and JWKS-backed ID-token
-    validation.
+    loads ``config.txt``. The client uses discovery, PKCE, nonce validation,
+    and JWKS-backed ID-token validation.
     """
 
     def __init__(self) -> None:

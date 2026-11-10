@@ -2,8 +2,7 @@
 
     Configuration values are read from ``config/config.txt`` relative to the
     application base directory, with fallbacks to ``config.txt`` under the
-    application directory and repository root.  Environment variables can
-    override values from the file.
+    application directory and repository root.
 The resulting paths are absolute, and the required directories are created
 when this module is imported.
 """
@@ -50,7 +49,7 @@ def _parse_output_dirs(value):
 
 
 def load_config() -> dict:
-    """Load runtime directories from a configuration file and the environment.
+    """Load runtime settings from the application's configuration file.
 
     The supported configuration keys are ``outputs_dir`` (a JSON array of
     ``{"nickname": "...", "path": "..."}`` objects), ``logs_dir``,
@@ -67,21 +66,19 @@ def load_config() -> dict:
     1. Built-in relative directory names are used as defaults.
     2. ``config/config.txt`` is read from :data:`BASE_DIR` when available.
     3. ``config.txt`` directly under :data:`BASE_DIR` is used as a fallback.
-     4. Environment variables override file values.  ``NOTOONS_*`` names are
-         preferred for all settings; legacy short names remain supported for
-         the directory settings.
 
-    Relative paths are resolved against :data:`BASE_DIR`.      Configured directories and the parent directory for the server log file
-    are created with :func:`os.makedirs` before the mapping is returned.
+    Relative paths are resolved against :data:`BASE_DIR`. Configured
+    directories and the parent directory for the server log file are created
+    with :func:`os.makedirs` before the mapping is returned.
 
     Returns:
         A mapping containing normalized output, log, and temporary paths and
         the configured server log file and level.
 
     Raises:
-        OSError: If a configured directory cannot be created.  Errors while
+        OSError: If a configured directory cannot be created. Errors while
             reading an existing configuration file are handled locally and
-            result in the available defaults or overrides being returned.
+            result in the available defaults or file values being returned.
     """
     cfg = {
         "outputs_dir": [{"nickname": "Default", "path": "outputs"}],
@@ -127,18 +124,6 @@ def load_config() -> dict:
         except (OSError, UnicodeError, ValueError) as e:
             logger.warning("Unable to read config.txt: %s", e)
 
-    outputs_override = os.getenv("NOTOONS_OUTPUTS_DIR", os.getenv("OUTPUTS_DIR"))
-    if outputs_override is not None:
-        try:
-            cfg["outputs_dir"] = _parse_output_dirs(outputs_override)
-        except ValueError as exc:
-            logger.warning("Invalid outputs directory override: %s", exc)
-    cfg["logs_dir"] = os.getenv("NOTOONS_LOGS_DIR", os.getenv("LOGS_DIR", cfg["logs_dir"]))
-    cfg["temp_dir"] = os.getenv("NOTOONS_TEMP_DIR", os.getenv("TEMP_DIR", cfg["temp_dir"]))
-    cfg["server_log_file"] = os.getenv(
-        "NOTOONS_SERVER_LOG_FILE", cfg["server_log_file"]
-    ).strip()
-    cfg["server_log_level"] = os.getenv("NOTOONS_SERVER_LOG_LEVEL", cfg["server_log_level"])
     level_name = str(cfg["server_log_level"]).strip().upper()
     level = logging.getLevelNamesMapping().get(level_name)
     if not isinstance(level, int):
@@ -146,18 +131,6 @@ def load_config() -> dict:
     cfg["server_log_level"] = logging.getLevelName(level)
     if not str(cfg["server_log_file"]).strip():
         raise ValueError("server_log_file must not be empty")
-    for key in (
-        "oidc_issuer_url",
-        "oidc_client_id",
-        "oidc_client_secret",
-        "oidc_redirect_uri",
-        "oidc_post_logout_redirect_uri",
-        "oidc_session_secret",
-        "oidc_scopes",
-        "oidc_cookie_secure",
-    ):
-        cfg[key] = os.getenv(f"NOTOONS_{key.upper()}", cfg[key])
-
     for output_dir in cfg["outputs_dir"]:
         path = output_dir["path"]
         if not os.path.isabs(path):

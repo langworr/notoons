@@ -69,7 +69,9 @@ oidc_cookie_secure = false
 
 Register the redirect URI with the identity provider. Use a long random value
 for `oidc_session_secret`, and set `oidc_cookie_secure = true` when the app is
-served over HTTPS.
+served over HTTPS. Runtime settings, including OIDC credentials and directory
+paths, are read only from `notoons/config/config.txt`; environment variables
+are not used to configure the application.
 
 `outputs_dir` accepts a JSON array of objects. Each object requires a unique
 `nickname` and a relative or absolute `path`. A legacy single path such as
@@ -80,26 +82,6 @@ inserted before the extension (for example, `server_2026-11-09.log`).
 Relative paths are placed inside `logs_dir`; absolute paths are also accepted.
 `server_log_level` accepts `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`.
 Uvicorn's console output remains enabled.
-
-Environment variables override file values. The preferred names are:
-
-| Setting | Environment variable |
-| --- | --- |
-| `outputs_dir` | `NOTOONS_OUTPUTS_DIR` |
-| `logs_dir` | `NOTOONS_LOGS_DIR` |
-| `temp_dir` | `NOTOONS_TEMP_DIR` |
-| `server_log_file` | `NOTOONS_SERVER_LOG_FILE` |
-| `server_log_level` | `NOTOONS_SERVER_LOG_LEVEL` |
-| `oidc_issuer_url` | `NOTOONS_OIDC_ISSUER_URL` |
-| `oidc_client_id` | `NOTOONS_OIDC_CLIENT_ID` |
-| `oidc_client_secret` | `NOTOONS_OIDC_CLIENT_SECRET` |
-| `oidc_redirect_uri` | `NOTOONS_OIDC_REDIRECT_URI` |
-| `oidc_post_logout_redirect_uri` | `NOTOONS_OIDC_POST_LOGOUT_REDIRECT_URI` |
-| `oidc_session_secret` | `NOTOONS_OIDC_SESSION_SECRET` |
-| `oidc_scopes` | `NOTOONS_OIDC_SCOPES` |
-| `oidc_cookie_secure` | `NOTOONS_OIDC_COOKIE_SECURE` |
-
-The legacy `OUTPUTS_DIR`, `LOGS_DIR`, and `TEMP_DIR` names remain supported.
 
 ## Running
 
