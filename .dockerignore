@@ -9,4 +9,7 @@ outputs
 logs
 temp
 notoons/config
+!notoons/config/
+notoons/config/*
+!notoons/config/config_template.txt
 test_*.py

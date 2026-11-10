@@ -1,0 +1,22 @@
+# notoons configuration file
+# Specify folder paths for outputs, logs, and temporary files.
+# Relative paths are resolved relative to the application directory.
+# Absolute paths (e.g. C:\Data\notoons\outputs) are also supported.
+
+outputs_dir = [{"nickname": "Default", "path": "outputs"}, {"nickname": "Archive", "path": "outputs/archive"}]
+logs_dir = logs
+temp_dir = temp
+# Relative server log paths are placed inside logs_dir.
+server_log_file = server.log
+server_log_level = INFO
+
+# OpenID Connect settings.
+# Register this callback URL with your identity provider.
+oidc_issuer_url = https://your.server/realms/your-domain/
+oidc_client_id = your_client_id
+oidc_client_secret = your_secret
+oidc_redirect_uri = http://your.server:port/auth/callback
+oidc_post_logout_redirect_uri = http://your.server:port/auth/logout
+oidc_session_secret = CHANGE_ME_TO_A_LONG_RANDOM_VALUE
+oidc_scopes = openid profile email
+oidc_cookie_secure = false

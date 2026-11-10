@@ -1,10 +1,7 @@
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    NOTOONS_OUTPUTS_DIR=/data/outputs \
-    NOTOONS_LOGS_DIR=/data/logs \
-    NOTOONS_TEMP_DIR=/tmp/notoons/temp
+ARG PUID=1000
+ARG PGID=1000
 
 WORKDIR /app
 
@@ -12,14 +9,15 @@ COPY requirements_prod.txt .
 RUN pip install --no-cache-dir -r requirements_prod.txt
 
 COPY notoons ./notoons
+COPY notoons/config/config_template.txt ./notoons/config/config_template.txt
 
-RUN mkdir -p /app/notoons/config /data/logs /data/outputs /tmp/notoons/temp \
-    && chown -R 10001:10001 /app/notoons/config /data/logs /data/outputs /tmp/notoons
-
-VOLUME ["/app/notoons/config", "/data/logs", "/data/outputs"]
+RUN groupadd -g ${PGID} notoons_group \
+    && useradd -u ${PUID} -g notoons_group -m notoons_user \
+    && mkdir -p /app/notoons/config /app/notoons/logs /app/notoons/outputs /app/notoons/temp  \
+    && chown -R ${PUID}:${PGID} /app/notoons/config /app/notoons/logs /app/notoons/outputs /app/notoons/temp
 
 EXPOSE 8000
 
-USER 10001:10001
+USER ${PUID}:${PGID}
 
 CMD ["python", "-m", "uvicorn", "notoons.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
