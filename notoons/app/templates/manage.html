@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/static/images/favicon.png">
+  <title>Notoons - File Management</title>
+  <link rel="stylesheet" href="/static/css/styles.css?v=20261111-paged">
+</head>
+<body>
+  <main class="container">
+    <header class="management-header">
+      <div>
+        <h1>File Management</h1>
+        <p class="subtitle">Manage logs and generated output files.</p>
+      </div>
+      <a class="btn-log-action" href="/">Back to converter</a>
+    </header>
+
+    <section class="panel management-panel">
+      <h2>Server logs</h2>
+      <p>Delete date-stamped server logs. The active log remains available for new entries.</p>
+      <button class="manage-button manage-button-danger"
+        onclick="deleteManagedFiles('/logs/server', 'Delete all server logs?')">
+        Delete server logs
+      </button>
+    </section>
+
+    <section class="panel management-panel">
+      <h2>Conversion logs</h2>
+      <p>Delete all per-job conversion logs and clear their in-memory log entries.</p>
+      <button class="manage-button manage-button-danger"
+        onclick="deleteManagedFiles('/logs/conversion', 'Delete all conversion logs?')">
+        Delete conversion logs
+      </button>
+    </section>
+
+    <section class="panel management-panel">
+      <h2>Default output files</h2>
+      <p>Delete files directly inside the output directory named <strong>Default</strong>.
+        Files in subfolders and other output directories are not changed.</p>
+      <button class="manage-button manage-button-danger"
+        onclick="deleteManagedFiles('/outputs/default', 'Delete all files directly inside the Default output directory? Subfolder files will be kept.')">
+        Delete top-level Default files
+      </button>
+    </section>
+
+    <section class="panel management-panel">
+      <h2>Download selected outputs</h2>
+      <p>Select files from all configured output directories. Files in nested subfolders are included.</p>
+      <div class="manage-file-actions">
+        <label for="outputDirectorySelect">Output directory</label>
+        <select id="outputDirectorySelect" onchange="changeOutputDirectory()"></select>
+        <button class="btn-log-action" type="button" onclick="selectCurrentPageFiles(true)">Select page</button>
+        <button class="btn-log-action" type="button" onclick="selectCurrentPageFiles(false)">Clear page</button>
+        <button class="btn-log-action" type="button" onclick="clearOutputSelection()">Clear all selection</button>
+        <button class="manage-button manage-button-download" id="downloadSelectedButton"
+          type="button" onclick="downloadSelectedOutputFiles()" disabled>
+          Download selected files
+        </button>
+      </div>
+      <nav class="manage-breadcrumbs" id="outputBreadcrumbs" aria-label="Output folder"></nav>
+      <div class="manage-file-list" id="outputFileList">Loading output files...</div>
+      <div class="manage-pagination">
+        <button class="btn-log-action" id="previousOutputPage" type="button"
+          onclick="changeOutputPage(-1)" disabled>Previous</button>
+        <span id="outputPageInfo"></span>
+        <button class="btn-log-action" id="nextOutputPage" type="button"
+          onclick="changeOutputPage(1)" disabled>Next</button>
+      </div>
+      <p class="manage-selection-count" id="outputSelectionCount">0 files selected</p>
+    </section>
+
+    <p class="management-status" id="managementStatus" role="status" aria-live="polite"></p>
+  </main>
+  <script src="/static/js/manage.js?v=20261111-paged2"></script>
+</body>
+</html>

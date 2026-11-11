@@ -10,8 +10,20 @@ request path.
 import falcon.asgi
 from ..auth import OIDCClient
 from .routes.auth import AuthResource
-from .routes.pages import HomeResource, ConfigResource
-from .routes.jobs import JobsResource, JobDetailResource, DownloadResource
+from .routes.pages import ConfigResource, FileManagementResource, HomeResource
+from .routes.jobs import (
+    ConversionLogsResource,
+    DownloadResource,
+    JobDetailResource,
+    JobEntryResource,
+    JobsResource,
+)
+from .routes.files import (
+    DefaultOutputResource,
+    OutputsArchiveResource,
+    OutputsFilesResource,
+    ServerLogsResource,
+)
 
 
 def add_routes(app: falcon.asgi.App, oidc: OIDCClient) -> None:
@@ -26,6 +38,8 @@ def add_routes(app: falcon.asgi.App, oidc: OIDCClient) -> None:
 
     ``GET /``
         Serves the application's HTML interface.
+    ``GET /manage``
+        Serves the authenticated file-management page.
     ``GET /config``
         Returns the named output directories and configured log/temp paths.
     ``GET /auth/login``
@@ -44,7 +58,23 @@ def add_routes(app: falcon.asgi.App, oidc: OIDCClient) -> None:
     ``GET /jobs/{job_id}``
         Returns the status and details of one conversion job.
     ``DELETE /jobs/{job_id}``
-        Removes a job and its generated or temporary files.
+        Removes a job and its generated or temporary files when its output is
+        inside the directory named ``Default``.
+    ``DELETE /jobs/{job_id}/entry``
+        Removes a completed job from the list without deleting its output.
+    ``DELETE /logs``
+        Deletes all conversion-job log files and clears retained job logs.
+    ``DELETE /logs/server``
+        Clears configured date-stamped server log files.
+    ``DELETE /outputs/default``
+        Deletes files directly inside the output directory named ``Default``.
+    ``GET /outputs/archive``
+        Downloads all configured output files, including nested files, in a ZIP.
+    ``GET /outputs/files``
+        Lists the current output folder's directories and paginated files.
+        Accepts ``directory``, ``path``, ``page``, and ``per_page`` parameters.
+    ``POST /outputs/archive``
+        Downloads selected output files, including nested files, in a ZIP.
     ``GET /download/{job_id}``
         Streams the completed CBZ archive for a conversion job.
 
@@ -63,6 +93,7 @@ def add_routes(app: falcon.asgi.App, oidc: OIDCClient) -> None:
 
     # Rotte per Frontend HTML
     app.add_route("/", HomeResource())
+    app.add_route("/manage", FileManagementResource())
     app.add_route("/config", ConfigResource())
     app.add_route("/auth/login", auth_resource)
     app.add_route("/auth/callback", auth_resource, suffix="callback")
@@ -73,4 +104,11 @@ def add_routes(app: falcon.asgi.App, oidc: OIDCClient) -> None:
     app.add_route("/jobs", jobs_resource)
     app.add_route("/process", jobs_resource)  # Alias
     app.add_route("/jobs/{job_id}", JobDetailResource())
+    app.add_route("/jobs/{job_id}/entry", JobEntryResource())
+    app.add_route("/logs", ConversionLogsResource())
+    app.add_route("/logs/conversion", ConversionLogsResource())
+    app.add_route("/logs/server", ServerLogsResource())
+    app.add_route("/outputs/default", DefaultOutputResource())
+    app.add_route("/outputs/archive", OutputsArchiveResource())
+    app.add_route("/outputs/files", OutputsFilesResource())
     app.add_route("/download/{job_id}", DownloadResource())

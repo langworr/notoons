@@ -208,6 +208,185 @@ p.subtitle {
   box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
 }
 
+.management-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.management-header h1 {
+  font-size: 1.65rem;
+  font-weight: 800;
+}
+
+.management-panel h2 {
+  font-size: 1.05rem;
+  margin-bottom: 0.45rem;
+}
+
+.management-panel p {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.manage-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1.1rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.manage-button-danger {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+}
+
+.manage-button-danger:hover {
+  background: rgba(248, 113, 113, 0.22);
+}
+
+.manage-button-download {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #bae6fd;
+}
+
+.manage-button-download:hover {
+  background: rgba(56, 189, 248, 0.22);
+}
+
+.management-status {
+  min-height: 1.5rem;
+  color: var(--success);
+  font-size: 0.9rem;
+}
+
+.management-status-error {
+  color: var(--danger);
+}
+
+.manage-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+
+.manage-file-actions .manage-button {
+  margin-top: 0;
+}
+
+.manage-file-actions .manage-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.manage-file-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.manage-file-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.65rem 0.8rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.manage-file-item + .manage-file-item {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.manage-file-item input {
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.manage-file-actions label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.manage-file-actions select {
+  max-width: 220px;
+  background: var(--input-bg);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.4rem 0.55rem;
+}
+
+.manage-breadcrumbs,
+.manage-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin: 0.75rem 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.manage-breadcrumb {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.manage-breadcrumb:disabled {
+  color: var(--text);
+  cursor: default;
+}
+
+.manage-folder-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.manage-folder-button:hover,
+.manage-breadcrumb:not(:disabled):hover {
+  text-decoration: underline;
+}
+
+.manage-pagination {
+  justify-content: center;
+}
+
+.manage-selection-count {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: right;
+}
+
 /* Dropzone */
 .dropzone {
   border: 2px dashed #334155;
@@ -582,6 +761,7 @@ select:focus {
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .btn-job {
@@ -602,6 +782,14 @@ select:focus {
 
 .btn-job:hover {
   background: #334155;
+}
+
+.btn-job-remove-entry {
+  color: var(--muted);
+}
+
+.btn-job-remove-entry:hover {
+  color: var(--warning);
 }
 
 .btn-job-download {

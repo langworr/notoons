@@ -174,11 +174,19 @@ All application endpoints require authentication unless stated otherwise.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/` | Main web interface |
+| `GET` | `/manage` | File-management subpage |
 | `GET` | `/config` | Active output, log, and temp directories |
 | `GET` | `/jobs` | List retained jobs |
 | `POST` | `/jobs` | Queue a multipart PDF conversion |
 | `GET` | `/jobs/{job_id}` | Read job status, progress, and logs |
-| `DELETE` | `/jobs/{job_id}` | Delete a job and its generated file |
+| `DELETE` | `/jobs/{job_id}` | Delete a job and its generated file when saved in the default output directory |
+| `DELETE` | `/jobs/{job_id}/entry` | Remove a completed job from the list while keeping its output |
+| `DELETE` | `/logs` | Delete all conversion-job log files |
+| `DELETE` | `/logs/server` | Delete configured server logs |
+| `DELETE` | `/outputs/default` | Delete top-level files in the `Default` output directory |
+| `GET` | `/outputs/files` | List selectable files from configured output directories |
+| `GET` | `/outputs/archive` | Download all configured output files as a ZIP |
+| `POST` | `/outputs/archive` | Download selected output files as a ZIP |
 | `GET` | `/download/{job_id}` | Download a completed CBZ |
 | `GET` | `/auth/login` | Begin OIDC login |
 | `GET` | `/auth/callback` | Handle the OIDC callback |
@@ -197,6 +205,25 @@ custom_subdir=Comics/Volume 1
 
 `custom_subdir` is optional. When provided, the directory is created beneath
 the selected configured output directory.
+
+The web interface only offers output-file deletion for jobs saved in the
+directory named `Default`, including its subfolders. The API enforces the same
+restriction.
+
+Conversion and server logs can be cleared separately from the **File
+management** subpage. Conversion-log cleanup is unavailable while a conversion
+is pending or processing.
+
+The **File management** link opens a subpage with separate actions to delete
+server logs, delete conversion logs, delete files directly inside the directory
+named `Default` (subfolders are left untouched), or select and download files
+from all configured output directories, including nested subfolders. The file
+browser navigates one directory at a time and paginates entries (50 per page by
+default), retaining file selections as you switch folders or pages.
+
+Completed jobs can be removed from the main page with **Remove entry**, which
+keeps the generated output file. The separate delete-file action removes both
+the job and its output.
 
 The upload response contains a `job_id`. Poll `GET /jobs/{job_id}` until its
 status is `completed` or `failed`, then use the returned `download_url`.

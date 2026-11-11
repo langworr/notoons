@@ -7,6 +7,7 @@ let isUploading = false;
 let pollInterval = null;
 let activeModalJobId = null;
 let cachedModalLogs = [];
+let defaultOutputDirNickname = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     const dropzone = document.getElementById('dropzone');
@@ -103,6 +104,9 @@ async function loadConfig() {
       : data.outputs_dir
         ? [{ nickname: data.outputs_dir, path: data.outputs_dir }]
         : [];
+    defaultOutputDirNickname = outputDirectories.find(
+      dir => dir.nickname === 'Default'
+    )?.nickname ?? null;
     if (outputDirectories.length) {
       outputDirSelect.innerHTML = outputDirectories.map(dir =>
         `<option value="${dir.nickname}">${dir.nickname}</option>`
@@ -256,7 +260,7 @@ function renderJobs(jobs) {
           </div>
         </div>
         <div class="job-actions">
-          ${job.status === 'completed' ? `
+          ${job.status === 'completed' && job.output_exists !== false ? `
             <a href="${job.download_url}" download="${job.cbz_filename}" class="btn-job btn-job-download">
               <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -273,6 +277,15 @@ function renderJobs(jobs) {
             </svg>
             Logs
           </button>
+          ${job.status !== 'pending' && job.status !== 'processing' ? `
+          <button class="btn-job btn-job-remove-entry"
+            title="Remove job entry without deleting its output"
+            onclick="removeJobEntry('${job.id}')">
+            Remove entry
+          </button>
+          ` : ''}
+          ${job.status !== 'pending' && job.status !== 'processing' &&
+              job.output_dir === defaultOutputDirNickname ? `
           <button class="btn-job-delete" title="Delete job & output file" onclick="deleteJob('${job.id}')">
             <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -280,6 +293,7 @@ function renderJobs(jobs) {
                   m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
             </svg>
           </button>
+          ` : ''}
         </div>
       </div>
     `;
@@ -368,10 +382,33 @@ function closeLogModal(e) {
 async function deleteJob(jobId) {
   if (!confirm('Remove this job and delete its generated output file?')) return;
   try {
-    await fetch(`/jobs/${jobId}`, { method: 'DELETE' });
+    const res = await fetch(`/jobs/${jobId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || `Request failed (${res.status})`);
+    }
     await fetchJobs();
   } catch (err) {
     console.error('Error deleting job:', err);
+    alert(`Could not delete job: ${err.message}`);
+  }
+}
+
+async function removeJobEntry(jobId) {
+  if (!confirm('Remove this job from the list? Its output file will be kept.')) return;
+  try {
+    const res = await fetch(`/jobs/${jobId}/entry`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || `Request failed (${res.status})`);
+    }
+    if (activeModalJobId === jobId) {
+      closeLogModal();
+    }
+    await fetchJobs();
+  } catch (err) {
+    console.error('Error removing job entry:', err);
+    alert(`Could not remove job entry: ${err.message}`);
   }
 }
 

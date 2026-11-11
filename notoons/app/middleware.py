@@ -13,7 +13,9 @@ class AuthenticationMiddleware:
     def __init__(self, oidc: OIDCClient) -> None:
         self.oidc = oidc
 
-    async def process_request(self, req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+    async def process_request(
+        self, req: falcon.asgi.Request, resp: falcon.asgi.Response
+    ) -> None:
         """Load the session or redirect/return 401 before route handling."""
         if req.path.startswith("/auth/") or req.path.startswith("/static/"):
             return
@@ -24,9 +26,13 @@ class AuthenticationMiddleware:
                 return
         except OIDCError:
             pass
-        if req.path.startswith(("/jobs", "/process", "/download", "/config")):
+        if req.path.startswith(
+            ("/jobs", "/process", "/download", "/config", "/logs", "/outputs")
+        ):
             raise falcon.HTTPUnauthorized(
                 title="Authentication required",
-                description="Sign in at /auth/login before using this endpoint.",
+                description=(
+                    "Sign in at /auth/login before using this endpoint."
+                ),
             )
         raise falcon.HTTPFound(location=f"/auth/login?next={req.path}")

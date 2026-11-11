@@ -43,6 +43,18 @@ class HomeResource:
             resp.text = f.read()
 
 
+class FileManagementResource:
+    """Serve the page for managing server logs, conversion logs, and outputs."""
+
+    async def on_get(
+        self, _req: falcon.asgi.Request, resp: falcon.asgi.Response
+    ) -> None:
+        html_path = os.path.join(TEMPLATES_DIR, "manage.html")
+        resp.content_type = falcon.MEDIA_HTML
+        with open(html_path, "r", encoding="utf-8") as f:
+            resp.text = f.read()
+
+
 class ConfigResource:
     """Expose active runtime paths and server logging settings through HTTP."""
 

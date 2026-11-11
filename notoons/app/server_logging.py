@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from datetime import date
 
 
@@ -58,3 +59,56 @@ def configure_server_logging(config: dict) -> None:
         handler.setFormatter(formatter)
         handler._notoons_server_log = True
         logger.addHandler(handler)
+
+
+def clear_server_logs(config: dict) -> int:
+    """Clear dated server logs while keeping active handlers ready to write."""
+    filename_template = os.path.abspath(config["server_log_file"])
+    directory, filename = os.path.split(filename_template)
+    stem, extension = os.path.splitext(filename)
+    filename_pattern = re.compile(
+        rf"^{re.escape(stem)}_\d{{4}}-\d{{2}}-\d{{2}}{re.escape(extension)}$"
+    )
+    handlers = [
+        handler
+        for logger in (
+            logging.getLogger(),
+            logging.getLogger("uvicorn.error"),
+            logging.getLogger("uvicorn.access"),
+        )
+        for handler in logger.handlers
+        if getattr(handler, "_notoons_server_log", False)
+        and os.path.normcase(
+            os.path.abspath(handler.filename_template)
+        ) == os.path.normcase(filename_template)
+    ]
+    active_paths = {
+        os.path.normcase(os.path.abspath(handler.baseFilename))
+        for handler in handlers
+    }
+
+    cleared_paths = set()
+    for handler in handlers:
+        handler.acquire()
+        try:
+            path = os.path.normcase(os.path.abspath(handler.baseFilename))
+            if handler.stream and path not in cleared_paths:
+                handler.flush()
+                handler.stream.seek(0)
+                handler.stream.truncate()
+                cleared_paths.add(path)
+        finally:
+            handler.release()
+
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            path = os.path.abspath(entry.path)
+            if (
+                filename_pattern.fullmatch(entry.name)
+                and os.path.normcase(path) not in active_paths
+                and entry.is_file(follow_symlinks=False)
+            ):
+                os.remove(path)
+                cleared_paths.add(os.path.normcase(path))
+
+    return len(cleared_paths)

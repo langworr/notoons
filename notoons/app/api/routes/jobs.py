@@ -18,6 +18,8 @@ import falcon.asgi
 from ...config import CONFIG
 from ...state import JOBS, JOBS_ORDER, cleanup_jobs, start_job_background
 
+CONVERSION_LOG_NAME = re.compile(r"^[0-9a-f]{10}_.+\.log$", re.IGNORECASE)
+
 
 def sanitize_custom_subdir(value):
     """Normalize a user-provided relative output subdirectory."""
@@ -42,6 +44,30 @@ def resolve_job_output_dir(base_dir, custom_subdir):
     if os.path.commonpath((base_path, target_path)) != base_path:
         return base_path, ""
     return target_path, safe_subdir
+
+
+def is_default_output_job(job):
+    """Return whether a job's file is in the default output directory."""
+    default_output = next(
+        (
+            output
+            for output in CONFIG["outputs_dir"]
+            if output["nickname"] == "Default"
+        ),
+        None,
+    )
+    cbz_path = job.get("cbz_path")
+    if not default_output or job.get("output_dir") != "Default" or not cbz_path:
+        return False
+
+    default_path = os.path.normcase(os.path.realpath(default_output["path"]))
+    output_path = os.path.normcase(os.path.realpath(cbz_path))
+    try:
+        return output_path != default_path and os.path.commonpath(
+            (default_path, output_path)
+        ) == default_path
+    except ValueError:
+        return False
 
 
 def reserve_output_path(output_dir, filename, job_id):
@@ -108,6 +134,9 @@ class JobsResource:
                 "dpi": j["dpi"],
                 "output_dir": j["output_dir"],
                 "custom_subdir": j.get("custom_subdir", ""),
+                "output_exists": bool(
+                    j.get("cbz_path") and os.path.isfile(j["cbz_path"])
+                ),
                 "file_size_bytes": j["file_size_bytes"],
                 "total_pages": j["total_pages"],
                 "pages_processed": j.get("pages_processed", j["total_pages"]),
@@ -319,21 +348,41 @@ class JobDetailResource:
         }
 
     async def on_delete(self, _req: falcon.asgi.Request, resp: falcon.asgi.Response, job_id: str) -> None:
-        """Delete a job and remove its generated and temporary files.
+        """Delete a default-output job and its generated and temporary files.
 
         The job is removed from both in-memory indexes.  When paths are
         present, the generated CBZ archive and uploaded temporary PDF are
-        deleted from disk.  Deletion is idempotent: an unknown job still
-        receives a successful response.
+        deleted from disk. Output files outside the first configured output
+        directory cannot be deleted through this endpoint. Deletion is
+        idempotent: an unknown job still receives a successful response.
 
         Args:
             _req: Falcon request object, unused by this handler.
-            resp: Falcon response populated with ``{"status": "ok"}``.
+            resp: Falcon response populated with ``{"status": "ok"}`` or an
+                error when the job's output is outside the default directory.
             job_id: Identifier supplied by the ``/jobs/{job_id}`` route.
 
         Returns:
-            ``None``.  The response status is always ``200 OK``.
+            ``None``. The response is ``200 OK`` for deleted or unknown jobs,
+            and ``403 Forbidden`` when the output is outside the default
+            directory.
         """
+        j = JOBS.get(job_id)
+        if j and j.get("status") in ("pending", "processing"):
+            resp.status = falcon.HTTP_409
+            resp.media = {
+                "status": "error",
+                "error": "An active job cannot be deleted",
+            }
+            return
+        if j and not is_default_output_job(j):
+            resp.status = falcon.HTTP_403
+            resp.media = {
+                "status": "error",
+                "error": "Only files in the default output directory can be deleted",
+            }
+            return
+
         j = JOBS.pop(job_id, None)
         if job_id in JOBS_ORDER:
             JOBS_ORDER.remove(job_id)
@@ -354,6 +403,86 @@ class JobDetailResource:
 
         resp.status = falcon.HTTP_200
         resp.media = {"status": "ok"}
+
+
+class JobEntryResource:
+    """Remove a completed or failed job from the in-memory job list."""
+
+    async def on_delete(
+        self, _req: falcon.asgi.Request, resp: falcon.asgi.Response, job_id: str
+    ) -> None:
+        job = JOBS.get(job_id)
+        if not job:
+            resp.status = falcon.HTTP_404
+            resp.media = {"status": "error", "error": "Job not found"}
+            return
+        if job.get("status") in ("pending", "processing"):
+            resp.status = falcon.HTTP_409
+            resp.media = {
+                "status": "error",
+                "error": "An active job cannot be removed from the list",
+            }
+            return
+
+        JOBS.pop(job_id)
+        if job_id in JOBS_ORDER:
+            JOBS_ORDER.remove(job_id)
+        resp.status = falcon.HTTP_200
+        resp.media = {"status": "ok"}
+
+
+class ConversionLogsResource:
+    """Delete all conversion-job logs from disk and retained job records."""
+
+    async def on_delete(self, _req: falcon.asgi.Request, resp: falcon.asgi.Response) -> None:
+        """Remove conversion logs without touching daily server log files.
+
+        Clearing is rejected while a conversion is pending or processing so
+        that an active job cannot recreate its log immediately afterward.
+        """
+        if any(job.get("status") in ("pending", "processing") for job in JOBS.values()):
+            resp.status = falcon.HTTP_409
+            resp.media = {
+                "status": "error",
+                "error": "Wait for active conversions to finish before clearing logs",
+            }
+            return
+
+        logs_dir = CONFIG["logs_dir"]
+        server_log_file = os.path.basename(CONFIG["server_log_file"])
+        server_stem, server_extension = os.path.splitext(server_log_file)
+        server_log_pattern = re.compile(
+            rf"^{re.escape(server_stem)}_\d{{4}}-\d{{2}}-\d{{2}}"
+            rf"{re.escape(server_extension)}$"
+        )
+        log_paths = []
+        with os.scandir(logs_dir) as entries:
+            for entry in entries:
+                if (
+                    entry.is_file(follow_symlinks=False)
+                    and CONVERSION_LOG_NAME.fullmatch(entry.name)
+                    and entry.name != server_log_file
+                    and not server_log_pattern.fullmatch(entry.name)
+                ):
+                    log_paths.append(entry.path)
+
+        try:
+            for log_path in log_paths:
+                os.remove(log_path)
+        except OSError as exc:
+            resp.status = falcon.HTTP_500
+            resp.media = {
+                "status": "error",
+                "error": f"Unable to delete conversion logs: {exc}",
+            }
+            return
+
+        for job in JOBS.values():
+            job["logs"] = []
+            job["log_path"] = None
+
+        resp.status = falcon.HTTP_200
+        resp.media = {"status": "ok", "deleted_count": len(log_paths)}
 
 
 class DownloadResource:
