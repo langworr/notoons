@@ -1,5 +1,7 @@
 """Authenticated file-management endpoints for logs and conversion outputs."""
 
+import asyncio
+import io
 import math
 import os
 import re
@@ -9,10 +11,169 @@ import zipfile
 
 import falcon
 import falcon.asgi
+import pymupdf
+from PIL import Image, UnidentifiedImageError
 
 from ...config import CONFIG
 from ...server_logging import clear_server_logs
 from ...state import JOBS
+
+MAX_PDF_SIZE_BYTES = 100 * 1024 * 1024
+MAX_CBZ_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+MAX_CBZ_PAGES = 500
+MAX_CBZ_ENTRIES = 1000
+MAX_CBZ_IMAGE_BYTES = 64 * 1024 * 1024
+MAX_IMAGE_PIXELS = 12_000_000
+PDF_IMAGE_SIZE = (1600, 2200)
+PDF_JPEG_QUALITY = 78
+IMAGE_EXTENSIONS = {
+    ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp",
+}
+
+
+class InvalidCbzError(ValueError):
+    """Raised when an input file is not a usable CBZ archive."""
+
+
+class PdfTooLargeError(ValueError):
+    """Raised when a conversion would exceed the PDF size limit."""
+
+
+def _natural_sort_key(value):
+    return tuple(
+        (0, int(part)) if part.isdecimal() else (1, part.casefold())
+        for part in re.split(r"(\d+)", value)
+    )
+
+
+def _convert_cbz_to_pdf(cbz_path, pdf_path):
+    """Convert a bounded CBZ archive to an image-compressed PDF file."""
+    if os.path.splitext(cbz_path)[1].casefold() != ".cbz":
+        raise InvalidCbzError("PDF downloads are only supported for CBZ files")
+
+    try:
+        archive = zipfile.ZipFile(cbz_path)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise InvalidCbzError(
+            "The selected CBZ file is not a valid archive"
+        ) from exc
+
+    document = pymupdf.open()
+    try:
+        with archive:
+            entries = archive.infolist()
+            if len(entries) > MAX_CBZ_ENTRIES:
+                raise PdfTooLargeError(
+                    f"The CBZ contains more than {MAX_CBZ_ENTRIES} files"
+                )
+            images = sorted(
+                [
+                    entry
+                    for entry in entries
+                    if not entry.is_dir()
+                    and os.path.splitext(entry.filename)[1].casefold()
+                    in IMAGE_EXTENSIONS
+                ],
+                key=lambda entry: _natural_sort_key(entry.filename),
+            )
+            if not images:
+                raise InvalidCbzError(
+                    "The CBZ archive contains no supported images"
+                )
+            if len(images) > MAX_CBZ_PAGES:
+                raise PdfTooLargeError(
+                    f"The CBZ contains more than {MAX_CBZ_PAGES} pages"
+                )
+            uncompressed_size = sum(entry.file_size for entry in images)
+            if uncompressed_size > MAX_CBZ_UNCOMPRESSED_BYTES:
+                raise PdfTooLargeError(
+                    "The CBZ images exceed the supported uncompressed size"
+                )
+
+            total_image_bytes = 0
+            for entry in images:
+                if entry.file_size > MAX_CBZ_IMAGE_BYTES:
+                    raise PdfTooLargeError(
+                        f"Image '{entry.filename}' exceeds the 64 MiB limit"
+                    )
+                try:
+                    image_data = archive.read(entry)
+                    with Image.open(io.BytesIO(image_data)) as image:
+                        if image.width * image.height > MAX_IMAGE_PIXELS:
+                            raise PdfTooLargeError(
+                                f"Image '{entry.filename}' exceeds the "
+                                "supported pixel dimensions"
+                            )
+                        image.seek(0)
+                        image.thumbnail(
+                            PDF_IMAGE_SIZE, Image.Resampling.LANCZOS
+                        )
+                        if (
+                            image.mode in ("RGBA", "LA")
+                            or "transparency" in image.info
+                        ):
+                            rgba_image = image.convert("RGBA")
+                            rgb_image = Image.new(
+                                "RGB", rgba_image.size, "white"
+                            )
+                            rgb_image.paste(
+                                rgba_image,
+                                mask=rgba_image.getchannel("A"),
+                            )
+                            image = rgb_image
+                        elif image.mode != "RGB":
+                            image = image.convert("RGB")
+                        image_width, image_height = image.size
+                        buffer = io.BytesIO()
+                        image.save(
+                            buffer,
+                            format="JPEG",
+                            quality=PDF_JPEG_QUALITY,
+                            optimize=True,
+                        )
+                        jpeg_data = buffer.getvalue()
+                except PdfTooLargeError:
+                    raise
+                except (
+                    OSError,
+                    ValueError,
+                    RuntimeError,
+                    UnidentifiedImageError,
+                    zipfile.BadZipFile,
+                ) as exc:
+                    raise InvalidCbzError(
+                        f"Unable to read CBZ image '{entry.filename}'"
+                    ) from exc
+
+                total_image_bytes += len(jpeg_data)
+                if total_image_bytes > MAX_PDF_SIZE_BYTES:
+                    raise PdfTooLargeError(
+                        "The converted PDF would exceed the 100 MiB size limit"
+                    )
+
+                page_width = image_width * 72 / 150
+                page_height = image_height * 72 / 150
+                page = document.new_page(width=page_width, height=page_height)
+                page.insert_image(page.rect, stream=jpeg_data)
+
+        document.save(
+            pdf_path,
+            garbage=4,
+            deflate=True,
+            deflate_images=True,
+            deflate_fonts=True,
+        )
+    except zipfile.BadZipFile as exc:
+        raise InvalidCbzError(
+            "The selected CBZ file is not a valid archive"
+        ) from exc
+    finally:
+        document.close()
+
+    if os.path.getsize(pdf_path) > MAX_PDF_SIZE_BYTES:
+        raise PdfTooLargeError(
+            "The converted PDF would exceed the 100 MiB size limit"
+        )
 
 
 def _is_within(root, path):
@@ -514,6 +675,98 @@ class OutputsArchiveResource:
                 archive_file.close()
                 try:
                     os.remove(archive_path)
+                except FileNotFoundError:
+                    pass
+
+        resp.stream = file_streamer()
+
+
+class OutputPdfResource:
+    """Convert one selected CBZ output to a temporary PDF for download."""
+
+    async def on_post(
+        self, req: falcon.asgi.Request, resp: falcon.asgi.Response
+    ) -> None:
+        payload = await req.get_media()
+        file_id = payload.get("file") if isinstance(payload, dict) else None
+        if not isinstance(file_id, str):
+            resp.status = falcon.HTTP_400
+            resp.media = {
+                "status": "error",
+                "error": "Select one CBZ file to download",
+            }
+            return
+
+        output_file = _resolve_output_file(file_id)
+        if not output_file:
+            resp.status = falcon.HTTP_400
+            resp.media = {
+                "status": "error",
+                "error": "The selected output file is no longer available",
+            }
+            return
+        _, cbz_path, relative_path = output_file
+        if os.path.splitext(cbz_path)[1].casefold() != ".cbz":
+            resp.status = falcon.HTTP_400
+            resp.media = {
+                "status": "error",
+                "error": "PDF downloads are only supported for CBZ files",
+            }
+            return
+
+        pdf_path = None
+        try:
+            descriptor, pdf_path = tempfile.mkstemp(
+                prefix=f"output_{uuid.uuid4().hex}_",
+                suffix=".pdf",
+                dir=CONFIG["temp_dir"],
+            )
+            os.close(descriptor)
+            await asyncio.to_thread(_convert_cbz_to_pdf, cbz_path, pdf_path)
+            pdf_file = open(pdf_path, "rb")
+        except InvalidCbzError as exc:
+            if pdf_path and os.path.exists(pdf_path):
+                os.remove(pdf_path)
+            resp.status = falcon.HTTP_400
+            resp.media = {"status": "error", "error": str(exc)}
+            return
+        except PdfTooLargeError as exc:
+            if pdf_path and os.path.exists(pdf_path):
+                os.remove(pdf_path)
+            resp.status = falcon.HTTP_413
+            resp.media = {"status": "error", "error": str(exc)}
+            return
+        except (OSError, RuntimeError, ValueError) as exc:
+            if pdf_path and os.path.exists(pdf_path):
+                os.remove(pdf_path)
+            resp.status = falcon.HTTP_500
+            resp.media = {
+                "status": "error",
+                "error": f"Unable to convert selected CBZ to PDF: {exc}",
+            }
+            return
+
+        base_name = os.path.splitext(os.path.basename(relative_path))[0]
+        download_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._")
+        download_name = f"{download_name or 'comic'}.pdf"
+        resp.status = falcon.HTTP_200
+        resp.content_type = "application/pdf"
+        resp.append_header(
+            "Content-Disposition",
+            f'attachment; filename="{download_name}"',
+        )
+
+        async def file_streamer():
+            try:
+                while True:
+                    chunk = pdf_file.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                pdf_file.close()
+                try:
+                    os.remove(pdf_path)
                 except FileNotFoundError:
                     pass
 

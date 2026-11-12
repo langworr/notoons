@@ -47,13 +47,19 @@
 
     <section class="panel management-panel">
       <h2>Download selected outputs</h2>
-      <p>Select files from all configured output directories. Files in nested subfolders are included.</p>
+      <p>Select files from all configured output directories. Files in nested subfolders are included.
+        PDF downloads convert each selected CBZ separately and are limited to 100 MiB each.</p>
       <div class="manage-file-actions">
         <label for="outputDirectorySelect">Output directory</label>
         <select id="outputDirectorySelect" onchange="changeOutputDirectory()"></select>
         <button class="btn-log-action" type="button" onclick="selectCurrentPageFiles(true)">Select page</button>
         <button class="btn-log-action" type="button" onclick="selectCurrentPageFiles(false)">Clear page</button>
         <button class="btn-log-action" type="button" onclick="clearOutputSelection()">Clear all selection</button>
+        <label for="outputDownloadFormat">Download format</label>
+        <select id="outputDownloadFormat">
+          <option value="zip">ZIP archive</option>
+          <option value="pdf">Separate PDF files (CBZ only)</option>
+        </select>
         <button class="manage-button manage-button-download" id="downloadSelectedButton"
           type="button" onclick="downloadSelectedOutputFiles()" disabled>
           Download selected files
@@ -73,6 +79,6 @@
 
     <p class="management-status" id="managementStatus" role="status" aria-live="polite"></p>
   </main>
-  <script src="/static/js/manage.js?v=20261111-paged2"></script>
+  <script src="/static/js/manage.js?v=20261111-pdf"></script>
 </body>
 </html>

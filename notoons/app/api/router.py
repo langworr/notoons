@@ -22,6 +22,7 @@ from .routes.files import (
     DefaultOutputResource,
     OutputsArchiveResource,
     OutputsFilesResource,
+    OutputPdfResource,
     ServerLogsResource,
 )
 
@@ -75,6 +76,8 @@ def add_routes(app: falcon.asgi.App, oidc: OIDCClient) -> None:
         Accepts ``directory``, ``path``, ``page``, and ``per_page`` parameters.
     ``POST /outputs/archive``
         Downloads selected output files, including nested files, in a ZIP.
+    ``POST /outputs/pdf``
+        Converts one selected CBZ output to a size-limited PDF.
     ``GET /download/{job_id}``
         Streams the completed CBZ archive for a conversion job.
 
@@ -111,4 +114,5 @@ def add_routes(app: falcon.asgi.App, oidc: OIDCClient) -> None:
     app.add_route("/outputs/default", DefaultOutputResource())
     app.add_route("/outputs/archive", OutputsArchiveResource())
     app.add_route("/outputs/files", OutputsFilesResource())
+    app.add_route("/outputs/pdf", OutputPdfResource())
     app.add_route("/download/{job_id}", DownloadResource())

@@ -1,5 +1,6 @@
 const outputPageSize = 50;
 const selectedOutputFiles = new Set();
+const selectedOutputFileNames = new Map();
 let currentOutputDirectory = 0;
 let currentOutputPath = '';
 let currentOutputPage = 1;
@@ -101,8 +102,13 @@ function renderOutputEntries(entries) {
       checkbox.type = 'checkbox';
       checkbox.checked = selectedOutputFiles.has(entry.id);
       checkbox.addEventListener('change', () => {
-        if (checkbox.checked) selectedOutputFiles.add(entry.id);
-        else selectedOutputFiles.delete(entry.id);
+        if (checkbox.checked) {
+          selectedOutputFiles.add(entry.id);
+          selectedOutputFileNames.set(entry.id, entry.name);
+        } else {
+          selectedOutputFiles.delete(entry.id);
+          selectedOutputFileNames.delete(entry.id);
+        }
         updateDownloadButton();
       });
       const name = document.createElement('span');
@@ -141,8 +147,13 @@ function selectCurrentPageFiles(selected) {
   currentOutputListing.entries
     .filter(entry => entry.kind === 'file')
     .forEach(entry => {
-      if (selected) selectedOutputFiles.add(entry.id);
-      else selectedOutputFiles.delete(entry.id);
+      if (selected) {
+        selectedOutputFiles.add(entry.id);
+        selectedOutputFileNames.set(entry.id, entry.name);
+      } else {
+        selectedOutputFiles.delete(entry.id);
+        selectedOutputFileNames.delete(entry.id);
+      }
     });
   renderOutputEntries(currentOutputListing.entries);
   updateDownloadButton();
@@ -150,6 +161,7 @@ function selectCurrentPageFiles(selected) {
 
 function clearOutputSelection() {
   selectedOutputFiles.clear();
+  selectedOutputFileNames.clear();
   if (currentOutputListing) {
     renderOutputEntries(currentOutputListing.entries);
   }
@@ -168,31 +180,70 @@ async function downloadSelectedOutputFiles() {
 
   const status = document.getElementById('managementStatus');
   const button = document.getElementById('downloadSelectedButton');
+  const format = document.getElementById('outputDownloadFormat').value;
+  const selected = Array.from(selectedOutputFiles);
+  if (
+    format === 'pdf'
+    && selected.some(fileId =>
+      !selectedOutputFileNames.get(fileId).toLowerCase().endsWith('.cbz')
+    )
+  ) {
+    status.textContent = 'PDF downloads are only supported for CBZ files.';
+    status.classList.add('management-status-error');
+    return;
+  }
+
   button.disabled = true;
   status.textContent = 'Preparing selected files...';
   status.classList.remove('management-status-error');
 
   try {
-    const selected = Array.from(selectedOutputFiles);
-    const response = await fetch('/outputs/archive', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ files: selected })
-    });
-    if (!response.ok) {
-      const data = await response.json();
-      throw new Error(data.error || `Request failed (${response.status})`);
-    }
+    if (format === 'pdf') {
+      for (let index = 0; index < selected.length; index += 1) {
+        status.textContent =
+          `Converting file ${index + 1} of ${selected.length} to PDF...`;
+        const response = await fetch('/outputs/pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: selected[index] })
+        });
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || `Request failed (${response.status})`);
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const disposition = response.headers.get('Content-Disposition') || '';
+        const filename = disposition.match(/filename="([^"]+)"/i);
+        link.href = url;
+        link.download = filename ? filename[1] : 'comic.pdf';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      status.textContent =
+        `Downloaded ${selected.length} PDF file${selected.length === 1 ? '' : 's'}.`;
+    } else {
+      const response = await fetch('/outputs/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: selected })
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || `Request failed (${response.status})`);
+      }
 
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'notoons_outputs.zip';
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    status.textContent =
-      `Download ready (${selected.length} selected file${selected.length === 1 ? '' : 's'}).`;
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'notoons_outputs.zip';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      status.textContent =
+        `Download ready (${selected.length} selected file${selected.length === 1 ? '' : 's'}).`;
+    }
   } catch (error) {
     console.error('Could not download selected output files:', error);
     status.textContent = `Could not download selected files: ${error.message}`;
